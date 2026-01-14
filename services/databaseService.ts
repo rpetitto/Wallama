@@ -36,6 +36,7 @@ const mapPostFromDB = (dbPost: any): Post => {
     content: dbPost.content || '',
     authorName: dbPost.author_name || 'Anonymous',
     authorId: dbPost.author_id || '',
+    authorAvatar: dbPost.author_avatar || undefined,
     createdAt: dbPost.created_at ? new Date(dbPost.created_at).getTime() : Date.now(),
     x: Number(dbPost.x) || 0,
     y: Number(dbPost.y) || 0,
@@ -182,6 +183,7 @@ export const databaseService = {
         content: post.content || '',
         author_name: post.authorName || 'Anonymous',
         author_id: post.authorId || 'anon',
+        author_avatar: post.authorAvatar || null,
         x: Math.round(post.x || 100),
         y: Math.round(post.y || 100),
         z_index: Math.round(nextZ),
@@ -247,7 +249,6 @@ export const databaseService = {
 
   async deleteWall(wallId: string): Promise<boolean> {
     try {
-        // Posts should be deleted via Cascade in DB, but let's be safe if requested
         await supabase.from('posts').delete().eq('wall_id', wallId);
         await supabase.from('wall_members').delete().eq('wall_id', wallId);
         const { error } = await supabase.from('walls').delete().eq('id', wallId);

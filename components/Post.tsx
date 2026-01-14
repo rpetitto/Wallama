@@ -1,7 +1,8 @@
 
-import React, { useState, useRef } from 'react';
+import React, { useState, useRef, useEffect, useMemo } from 'react';
 import { Post as PostType } from '../types';
 import { Trash2, GripHorizontal, ExternalLink, Clock, User, Quote, Pencil, HardDrive, Lock } from 'lucide-react';
+import { marked } from 'marked';
 
 interface PostProps {
   post: PostType;
@@ -16,17 +17,48 @@ interface PostProps {
   zoom: number;
 }
 
+const getRelativeTime = (timestamp: number): string => {
+  const now = Date.now();
+  const diff = now - timestamp;
+  const seconds = Math.floor(diff / 1000);
+  const minutes = Math.floor(seconds / 60);
+  const hours = Math.floor(minutes / 60);
+  const days = Math.floor(hours / 24);
+  const weeks = Math.floor(days / 7);
+
+  if (seconds < 60) return 'Just now';
+  if (minutes < 60) return `${minutes}m ago`;
+  if (hours < 24) return `${hours}h ago`;
+  if (days < 7) return `${days}d ago`;
+  if (weeks < 4) return `${weeks}w ago`;
+  return new Date(timestamp).toLocaleDateString();
+};
+
 const Post: React.FC<PostProps> = ({ post, onDelete, onEdit, onMove, onMoveEnd, isOwner, snapToGrid, isWallAnonymous, isWallFrozen, zoom }) => {
-  const [isHovered, setIsHovered] = useState(false);
   const [isDragging, setIsDragging] = useState(false);
+  const [relativeTime, setRelativeTime] = useState(getRelativeTime(post.createdAt));
   const dragStartPos = useRef({ x: 0, y: 0 });
   const postStartPos = useRef({ x: post.x, y: post.y });
   const currentPos = useRef({ x: post.x, y: post.y });
 
+  // Render markdown safely
+  const renderedMarkdown = useMemo(() => {
+    if (post.type !== 'text') return null;
+    return { __html: marked.parse(post.content, { breaks: true, gfm: true }) };
+  }, [post.content, post.type]);
+
+  // Update relative time periodically
+  useEffect(() => {
+    const timer = setInterval(() => {
+      setRelativeTime(getRelativeTime(post.createdAt));
+    }, 60000); // Update every minute
+    return () => clearInterval(timer);
+  }, [post.createdAt]);
+
   const handleMouseDown = (e: React.MouseEvent) => {
     e.stopPropagation();
     if (!isOwner || isWallFrozen) return;
-    if ((e.target as HTMLElement).closest('button, video, a')) return;
+    if ((e.target as HTMLElement).closest('button, video, a, input, [role="button"]')) return;
 
     setIsDragging(true);
     dragStartPos.current = { x: e.clientX, y: e.clientY };
@@ -64,6 +96,13 @@ const Post: React.FC<PostProps> = ({ post, onDelete, onEdit, onMove, onMoveEnd, 
 
   const renderContent = () => {
     switch (post.type) {
+      case 'text':
+        return (
+          <div 
+            className="markdown-content text-slate-900" 
+            dangerouslySetInnerHTML={renderedMarkdown as any} 
+          />
+        );
       case 'image':
         return <img src={post.content} alt="Post content" className="w-full h-auto rounded-lg mb-2 object-cover max-h-64 pointer-events-none" />;
       case 'gif':
@@ -113,18 +152,23 @@ const Post: React.FC<PostProps> = ({ post, onDelete, onEdit, onMove, onMoveEnd, 
       case 'video':
         return (
           <div className="relative group rounded-lg overflow-hidden mb-2 bg-black aspect-video">
-            <video src={post.content} controls className="w-full h-full" />
+            <video 
+              src={post.content} 
+              poster={post.metadata?.videoThumbnail}
+              controls 
+              className="w-full h-full" 
+            />
           </div>
         );
       case 'ai':
         return (
           <div className="relative p-3 bg-indigo-50 rounded-lg border-l-4 border-indigo-400 mb-2">
             <div className="text-[10px] font-bold text-indigo-400 mb-1 uppercase tracking-widest">AI Generated</div>
-            <p className="text-sm text-slate-800 leading-relaxed italic">"{post.content}"</p>
+            <p className="text-sm text-slate-900 leading-relaxed italic">"{post.content}"</p>
           </div>
         );
       default:
-        return <p className="text-slate-800 leading-relaxed whitespace-pre-wrap font-medium">{post.content}</p>;
+        return <p className="text-slate-900 leading-relaxed whitespace-pre-wrap font-medium">{post.content}</p>;
     }
   };
 
@@ -144,23 +188,25 @@ const Post: React.FC<PostProps> = ({ post, onDelete, onEdit, onMove, onMoveEnd, 
     <div 
       className={containerClass}
       style={containerStyle}
-      onMouseEnter={() => setIsHovered(true)}
-      onMouseLeave={() => setIsHovered(false)}
       onMouseDown={handleMouseDown}
     >
       <div className="flex items-center justify-between mb-3">
         <div className="flex items-center gap-2">
-          <div className="p-1.5 bg-white/40 rounded-full">
-            <User size={12} className="text-slate-600" />
+          <div className="h-6 w-6 rounded-full overflow-hidden bg-white/40 border border-black/5 flex items-center justify-center">
+            {post.authorAvatar && !isWallAnonymous ? (
+              <img src={post.authorAvatar} className="h-full w-full object-cover" alt="" referrerPolicy="no-referrer" />
+            ) : (
+              <User size={12} className="text-slate-600" />
+            )}
           </div>
-          <span className="text-xs font-bold text-slate-700 truncate max-w-[120px]">{displayName}</span>
+          <span className="text-xs font-bold text-slate-800 truncate max-w-[120px]">{displayName}</span>
         </div>
         <div className="flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
           {isWallFrozen && <Lock size={14} className="text-slate-400 mr-2" />}
           {isOwner && onEdit && !isWallFrozen && (
              <button 
               onClick={(e) => { e.stopPropagation(); onEdit(post.id); }}
-              className="p-1.5 text-slate-400 hover:text-cyan-600 hover:bg-cyan-50 rounded-lg transition-colors"
+              className="p-1.5 text-slate-500 hover:text-cyan-600 hover:bg-cyan-50 rounded-lg transition-colors"
             >
               <Pencil size={14} />
             </button>
@@ -168,7 +214,7 @@ const Post: React.FC<PostProps> = ({ post, onDelete, onEdit, onMove, onMoveEnd, 
           {isOwner && !isWallFrozen && (
             <button 
               onClick={(e) => { e.stopPropagation(); onDelete(post.id); }}
-              className="p-1.5 text-slate-400 hover:text-red-500 hover:bg-red-50 rounded-lg transition-colors"
+              className="p-1.5 text-slate-500 hover:text-red-500 hover:bg-red-50 rounded-lg transition-colors"
             >
               <Trash2 size={14} />
             </button>
@@ -184,9 +230,9 @@ const Post: React.FC<PostProps> = ({ post, onDelete, onEdit, onMove, onMoveEnd, 
       <div className="min-h-[40px]">
         {renderContent()}
         {post.metadata?.caption && (
-          <div className="mt-3 pt-3 border-t border-black/5">
-            <p className="text-sm text-slate-700 font-medium italic flex gap-2">
-              <Quote size={12} className="text-indigo-400 flex-shrink-0 mt-0.5" />
+          <div className="mt-3 pt-3 border-t border-black/5 bg-black/5 -mx-4 px-4 pb-1 rounded-b-xl">
+            <p className="text-sm text-slate-900 font-bold italic flex gap-2">
+              <Quote size={12} className="text-indigo-500 flex-shrink-0 mt-0.5" />
               {post.metadata.caption}
             </p>
           </div>
@@ -194,9 +240,9 @@ const Post: React.FC<PostProps> = ({ post, onDelete, onEdit, onMove, onMoveEnd, 
       </div>
 
       <div className="mt-4 pt-3 border-t border-black/5 flex items-center justify-between">
-        <div className="flex items-center gap-1 text-[10px] text-slate-500 font-bold uppercase tracking-wider">
+        <div className="flex items-center gap-1 text-[10px] text-slate-600 font-black uppercase tracking-wider">
           <Clock size={10} />
-          {new Date(post.createdAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
+          {relativeTime}
         </div>
       </div>
     </div>

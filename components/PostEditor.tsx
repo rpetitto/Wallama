@@ -1,7 +1,7 @@
 
 import React, { useState, useRef, useEffect } from 'react';
 import { PostType, Post } from '../types';
-import { X, Image as ImageIcon, Link as LinkIcon, Gift, Video, Sparkles, Send, Camera, StopCircle, Upload, Loader2, Type, Search, Check, Palette, MessageSquare, ShieldAlert, Save, HardDrive, FileText } from 'lucide-react';
+import { X, Image as ImageIcon, Link as LinkIcon, Gift, Video, Sparkles, Send, Camera, StopCircle, Upload, Loader2, Type, Search, Check, Palette, MessageSquare, ShieldAlert, Save, HardDrive, Bold, Italic, Underline, Code, List, ListOrdered, Scissors } from 'lucide-react';
 import { refinePostContent, checkContentSafety } from '../services/geminiService';
 import { WALL_COLORS } from '../constants';
 
@@ -26,6 +26,9 @@ const PostEditor: React.FC<PostEditorProps> = ({ onClose, onSubmit, authorName, 
   const [selectedColor, setSelectedColor] = useState(WALL_COLORS[0]);
   const [isRecording, setIsRecording] = useState(false);
   const [videoBase64, setVideoBase64] = useState<string | null>(null);
+  const [videoThumbnail, setVideoThumbnail] = useState<string | null>(null);
+  const [thumbnailTime, setThumbnailTime] = useState(0);
+  const [videoDuration, setVideoDuration] = useState(0);
   const [isRefining, setIsRefining] = useState(false);
   const [isFetchingLink, setIsFetchingLink] = useState(false);
   const [linkMetadata, setLinkMetadata] = useState<any>(null);
@@ -44,9 +47,11 @@ const PostEditor: React.FC<PostEditorProps> = ({ onClose, onSubmit, authorName, 
   const [driveSearch, setDriveSearch] = useState('');
 
   const videoRef = useRef<HTMLVideoElement>(null);
+  const previewVideoRef = useRef<HTMLVideoElement>(null);
   const mediaRecorderRef = useRef<MediaRecorder | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const driveTokenClient = useRef<any>(null);
+  const textareaRef = useRef<HTMLTextAreaElement>(null);
 
   // Initialize state if editing
   useEffect(() => {
@@ -62,6 +67,9 @@ const PostEditor: React.FC<PostEditorProps> = ({ onClose, onSubmit, authorName, 
         setContent(initialPost.content);
       } else if (initialPost.type === 'video') {
          setVideoBase64(initialPost.content);
+         if (initialPost.metadata?.videoThumbnail) {
+           setVideoThumbnail(initialPost.metadata.videoThumbnail);
+         }
       } else if (initialPost.type === 'link') {
          setUrl(initialPost.content);
          setLinkMetadata(initialPost.metadata);
@@ -91,8 +99,6 @@ const PostEditor: React.FC<PostEditorProps> = ({ onClose, onSubmit, authorName, 
   }, []);
 
   const handleDriveAuth = () => {
-    // If we already have a session token that might have drive scope, try it first?
-    // Actually, safest is to request the scope explicitly here.
     if (driveTokenClient.current) {
         driveTokenClient.current.requestAccessToken();
     } else {
@@ -122,12 +128,6 @@ const PostEditor: React.FC<PostEditorProps> = ({ onClose, onSubmit, authorName, 
         setIsDriveLoading(false);
     }
   };
-
-  useEffect(() => {
-    if (type === 'drive' && !driveToken && !initialPost) {
-        // Just show the auth button, don't auto trigger popup as it might be blocked
-    }
-  }, [type]);
 
   const searchGifs = async (query: string) => {
     setIsSearchingGifs(true);
@@ -205,7 +205,10 @@ const PostEditor: React.FC<PostEditorProps> = ({ onClose, onSubmit, authorName, 
         const blob = new Blob(chunks, { type: 'video/mp4' });
         const reader = new FileReader();
         reader.readAsDataURL(blob);
-        reader.onloadend = () => { setVideoBase64(reader.result as string); };
+        reader.onloadend = () => { 
+          setVideoBase64(reader.result as string);
+          setVideoThumbnail(null); // Reset thumbnail on new record
+        };
         stream.getTracks().forEach(t => t.stop());
       };
       recorder.start();
@@ -220,13 +223,57 @@ const PostEditor: React.FC<PostEditorProps> = ({ onClose, onSubmit, authorName, 
     setIsRecording(false);
   };
 
+  // Thumbnail Capture Logic
+  const captureThumbnail = () => {
+    const video = previewVideoRef.current;
+    if (!video) return;
+
+    const canvas = document.createElement('canvas');
+    canvas.width = video.videoWidth;
+    canvas.height = video.videoHeight;
+    const ctx = canvas.getContext('2d');
+    if (ctx) {
+      ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
+      const dataUrl = canvas.toDataURL('image/jpeg', 0.8);
+      setVideoThumbnail(dataUrl);
+    }
+  };
+
+  const handleScrub = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const time = parseFloat(e.target.value);
+    setThumbnailTime(time);
+    if (previewVideoRef.current) {
+      previewVideoRef.current.currentTime = time;
+    }
+  };
+
+  const applyMarkdown = (prefix: string, suffix: string = '') => {
+    const textarea = textareaRef.current;
+    if (!textarea) return;
+
+    const start = textarea.selectionStart;
+    const end = textarea.selectionEnd;
+    const text = textarea.value;
+    const selected = text.substring(start, end);
+    const before = text.substring(0, start);
+    const after = text.substring(end);
+
+    const newText = `${before}${prefix}${selected}${suffix}${after}`;
+    setContent(newText);
+    
+    // Restore focus and selection
+    setTimeout(() => {
+      textarea.focus();
+      textarea.setSelectionRange(start + prefix.length, end + prefix.length);
+    }, 0);
+  };
+
   const handleSelectDriveFile = (file: any) => {
-      // Use webViewLink as the main content URL for viewing
       setUrl(file.webViewLink);
       setLinkMetadata({
           title: file.name,
           mimeType: file.mimeType,
-          image: file.thumbnailLink, // Drive provides generic thumbnails usually
+          image: file.thumbnailLink,
           iconLink: file.iconLink,
           url: file.webViewLink
       });
@@ -237,7 +284,10 @@ const PostEditor: React.FC<PostEditorProps> = ({ onClose, onSubmit, authorName, 
     let submissionMetadata: any = {};
     setSafetyError(null);
 
-    if (type === 'video') submissionContent = videoBase64 || '';
+    if (type === 'video') {
+      submissionContent = videoBase64 || '';
+      submissionMetadata.videoThumbnail = videoThumbnail;
+    }
     else if (type === 'image' || type === 'gif') submissionContent = url;
     else if (type === 'link') {
       submissionContent = url;
@@ -326,8 +376,8 @@ const PostEditor: React.FC<PostEditorProps> = ({ onClose, onSubmit, authorName, 
                 key={tab.id}
                 onClick={() => { 
                     setType(tab.id as PostType); 
-                    setContent(''); 
-                    if (tab.id !== 'drive') { // preserve drive selection if switching back briefly? No, clean slate is safer
+                    if (tab.id !== 'text') setContent(''); 
+                    if (tab.id !== 'drive') { 
                        setUrl(''); 
                        setLinkMetadata(null);
                     }
@@ -343,20 +393,33 @@ const PostEditor: React.FC<PostEditorProps> = ({ onClose, onSubmit, authorName, 
 
           <div className="space-y-4">
             {type === 'text' && (
-              <div className="relative">
-                <textarea
-                  value={content}
-                  onChange={(e) => { setContent(e.target.value); setSafetyError(null); }}
-                  placeholder="Type something amazing..."
-                  className="w-full h-40 p-4 bg-white/50 border border-black/5 rounded-2xl focus:ring-4 focus:ring-cyan-500/20 focus:border-cyan-500 outline-none resize-none text-lg text-slate-900 placeholder:text-slate-400"
-                />
-                <button
-                  onClick={handleRefine}
-                  disabled={!content || isRefining}
-                  className="absolute bottom-4 right-4 flex items-center gap-2 px-3 py-1.5 bg-cyan-600 text-white rounded-full text-xs font-bold hover:bg-cyan-700 disabled:opacity-50 shadow-md transition-all"
-                >
-                  <Sparkles size={14} /> {isRefining ? 'Refining...' : 'AI Refine'}
-                </button>
+              <div className="space-y-2">
+                {/* Markdown Toolbar */}
+                <div className="flex gap-1 p-1 bg-white/30 rounded-lg border border-black/5">
+                  <button onClick={() => applyMarkdown('**', '**')} className="p-2 hover:bg-white/50 rounded-md transition-colors" title="Bold"><Bold size={16} /></button>
+                  <button onClick={() => applyMarkdown('*', '*')} className="p-2 hover:bg-white/50 rounded-md transition-colors" title="Italic"><Italic size={16} /></button>
+                  <button onClick={() => applyMarkdown('<u>', '</u>')} className="p-2 hover:bg-white/50 rounded-md transition-colors" title="Underline"><Underline size={16} /></button>
+                  <div className="w-px h-6 bg-black/10 mx-1 self-center" />
+                  <button onClick={() => applyMarkdown('`', '`')} className="p-2 hover:bg-white/50 rounded-md transition-colors" title="Code"><Code size={16} /></button>
+                  <button onClick={() => applyMarkdown('- ')} className="p-2 hover:bg-white/50 rounded-md transition-colors" title="Bullet List"><List size={16} /></button>
+                  <button onClick={() => applyMarkdown('1. ')} className="p-2 hover:bg-white/50 rounded-md transition-colors" title="Numbered List"><ListOrdered size={16} /></button>
+                </div>
+                <div className="relative">
+                  <textarea
+                    ref={textareaRef}
+                    value={content}
+                    onChange={(e) => { setContent(e.target.value); setSafetyError(null); }}
+                    placeholder="Type something amazing... Markdown supported!"
+                    className="w-full h-40 p-4 bg-white/50 border border-black/5 rounded-2xl focus:ring-4 focus:ring-cyan-500/20 focus:border-cyan-500 outline-none resize-none text-lg text-slate-900 placeholder:text-slate-400"
+                  />
+                  <button
+                    onClick={handleRefine}
+                    disabled={!content || isRefining}
+                    className="absolute bottom-4 right-4 flex items-center gap-2 px-3 py-1.5 bg-cyan-600 text-white rounded-full text-xs font-bold hover:bg-cyan-700 disabled:opacity-50 shadow-md transition-all"
+                  >
+                    <Sparkles size={14} /> {isRefining ? 'Refining...' : 'AI Refine'}
+                  </button>
+                </div>
               </div>
             )}
 
@@ -409,7 +472,6 @@ const PostEditor: React.FC<PostEditorProps> = ({ onClose, onSubmit, authorName, 
                                 <Search size={18} className="absolute left-3 top-3.5 text-slate-400" />
                                 {isDriveLoading && <Loader2 size={18} className="absolute right-3 top-3.5 animate-spin text-cyan-500" />}
                             </div>
-                            
                             <div className="grid grid-cols-2 gap-2 max-h-60 overflow-y-auto custom-scrollbar p-1">
                                 {driveFiles.map(file => (
                                     <div 
@@ -429,13 +491,6 @@ const PostEditor: React.FC<PostEditorProps> = ({ onClose, onSubmit, authorName, 
                                     </div>
                                 ))}
                             </div>
-                            
-                            {linkMetadata && url && (
-                                <div className="p-3 bg-cyan-50 rounded-xl border border-cyan-100 flex items-center gap-3">
-                                    <Check size={18} className="text-cyan-600" />
-                                    <span className="text-xs font-bold text-cyan-800">Selected: {linkMetadata.title}</span>
-                                </div>
-                            )}
                         </div>
                     )}
                 </div>
@@ -456,26 +511,16 @@ const PostEditor: React.FC<PostEditorProps> = ({ onClose, onSubmit, authorName, 
                     <Search className="absolute left-4 top-4 text-slate-400" size={20} />
                     {isSearchingGifs && <Loader2 className="absolute right-4 top-4 animate-spin text-cyan-500" size={20} />}
                   </div>
-                  <button 
-                    onClick={() => searchGifs(gifSearch)}
-                    className="flex-shrink-0 px-6 bg-cyan-600 text-white rounded-xl font-bold hover:bg-cyan-700 transition-colors"
-                  >
-                    Search
-                  </button>
+                  <button onClick={() => searchGifs(gifSearch)} className="flex-shrink-0 px-6 bg-cyan-600 text-white rounded-xl font-bold">Search</button>
                 </div>
                 <div className="grid grid-cols-3 gap-2 max-h-72 overflow-y-auto p-1 custom-scrollbar">
                   {gifs.map(gif => (
                     <button
                       key={gif.id}
                       onClick={() => setUrl(gif.images.fixed_height.url)}
-                      className={`relative aspect-square rounded-lg overflow-hidden border-4 transition-all ${url === gif.images.fixed_height.url ? 'border-cyan-600 shadow-lg' : 'border-transparent hover:border-black/10'}`}
+                      className={`relative aspect-square rounded-lg overflow-hidden border-4 transition-all ${url === gif.images.fixed_height.url ? 'border-cyan-600' : 'border-transparent'}`}
                     >
-                      <img src={gif.images.fixed_height.url} className="w-full h-full object-cover" alt={gif.title} />
-                      {url === gif.images.fixed_height.url && (
-                        <div className="absolute inset-0 bg-cyan-600/20 flex items-center justify-center">
-                          <Check className="text-white bg-cyan-600 rounded-full p-1" size={24} />
-                        </div>
-                      )}
+                      <img src={gif.images.fixed_height.url} className="w-full h-full object-cover" alt="" />
                     </button>
                   ))}
                 </div>
@@ -486,15 +531,57 @@ const PostEditor: React.FC<PostEditorProps> = ({ onClose, onSubmit, authorName, 
               <div className="space-y-4">
                 <div className="aspect-video bg-black rounded-2xl overflow-hidden relative shadow-inner">
                   <video ref={videoRef} autoPlay muted playsInline className={`w-full h-full object-cover ${!isRecording && !videoBase64 ? 'hidden' : ''}`} />
-                  {videoBase64 && !isRecording && <video src={videoBase64} controls className="w-full h-full object-cover absolute inset-0" />}
+                  {videoBase64 && !isRecording && (
+                    <video 
+                      ref={previewVideoRef} 
+                      src={videoBase64} 
+                      onLoadedMetadata={(e) => setVideoDuration(e.currentTarget.duration)}
+                      controls={false} 
+                      className="w-full h-full object-cover absolute inset-0" 
+                    />
+                  )}
                 </div>
+
+                {videoBase64 && !isRecording && (
+                  <div className="p-4 bg-white/50 rounded-2xl border border-black/5 space-y-3">
+                    <label className="text-xs font-black text-slate-400 uppercase tracking-widest flex items-center gap-2">
+                       <Scissors size={14} /> Select Thumbnail Frame
+                    </label>
+                    <div className="flex items-center gap-3">
+                      <input 
+                        type="range" 
+                        min="0" 
+                        max={videoDuration || 100} 
+                        step="0.1" 
+                        value={thumbnailTime} 
+                        onChange={handleScrub}
+                        className="flex-1 accent-cyan-600"
+                      />
+                      <button 
+                        onClick={captureThumbnail}
+                        className="px-4 py-2 bg-slate-800 text-white rounded-lg text-xs font-bold hover:bg-slate-900 transition-all flex items-center gap-2"
+                      >
+                         Capture
+                      </button>
+                    </div>
+                    {videoThumbnail && (
+                      <div className="flex items-center gap-3 mt-2">
+                        <img src={videoThumbnail} className="h-16 w-28 rounded-lg object-cover border border-black/10" alt="Thumb" />
+                        <span className="text-[10px] font-bold text-green-600 uppercase tracking-widest flex items-center gap-1">
+                          <Check size={12} /> Thumbnail Set
+                        </span>
+                      </div>
+                    )}
+                  </div>
+                )}
+
                 <div className="flex justify-center gap-4">
                   {!isRecording ? (
-                    <button onClick={startRecording} className="flex items-center gap-2 px-8 py-3 bg-red-600 text-white rounded-full hover:bg-red-700 transition-all font-bold">
+                    <button onClick={startRecording} className="flex items-center gap-2 px-8 py-3 bg-red-600 text-white rounded-full hover:bg-red-700 font-bold">
                       <Camera size={20} /> {videoBase64 ? 'Record New' : 'Start Recording'}
                     </button>
                   ) : (
-                    <button onClick={stopRecording} className="flex items-center gap-2 px-8 py-3 bg-slate-800 text-white rounded-full hover:bg-slate-900 transition-all font-bold animate-pulse">
+                    <button onClick={stopRecording} className="flex items-center gap-2 px-8 py-3 bg-slate-800 text-white rounded-full font-bold animate-pulse">
                       <StopCircle size={20} /> Stop
                     </button>
                   )}
@@ -504,17 +591,13 @@ const PostEditor: React.FC<PostEditorProps> = ({ onClose, onSubmit, authorName, 
 
             {type === 'image' && (
                <div className="space-y-4">
-                <div 
-                  onClick={() => fileInputRef.current?.click()}
-                  className="w-full h-48 border-2 border-dashed border-slate-300 rounded-2xl flex flex-col items-center justify-center gap-2 cursor-pointer hover:bg-white/50 bg-white/30 group overflow-hidden"
-                >
-                  {url ? <img src={url} className="w-full h-full object-contain" alt="Preview" /> : <><Upload className="text-slate-400 group-hover:text-slate-600" size={40} /><p className="text-sm font-bold text-slate-500">Upload Image</p></>}
+                <div onClick={() => fileInputRef.current?.click()} className="w-full h-48 border-2 border-dashed border-slate-300 rounded-2xl flex flex-col items-center justify-center gap-2 cursor-pointer hover:bg-white/50 bg-white/30 overflow-hidden">
+                  {url ? <img src={url} className="w-full h-full object-contain" alt="Preview" /> : <><Upload size={40} /><p className="text-sm font-bold">Upload Image</p></>}
                   <input ref={fileInputRef} type="file" accept="image/*" onChange={handleImageUpload} className="hidden" />
                 </div>
               </div>
             )}
 
-            {/* Caption Field - Available for ALL Types */}
             <div className="pt-2">
               <label className="block text-xs font-black text-slate-400 uppercase tracking-widest mb-2 flex items-center gap-2">
                 <MessageSquare size={14} /> Caption (Optional)
@@ -524,11 +607,10 @@ const PostEditor: React.FC<PostEditorProps> = ({ onClose, onSubmit, authorName, 
                 value={caption}
                 onChange={(e) => { setCaption(e.target.value); setSafetyError(null); }}
                 placeholder="Add a description..."
-                className="w-full px-4 py-3 bg-white/50 border border-black/5 rounded-xl outline-none focus:ring-4 focus:ring-cyan-500/20 text-sm text-slate-900 placeholder:text-slate-400"
+                className="w-full px-4 py-3 bg-white/50 border border-black/5 rounded-xl outline-none text-sm"
               />
             </div>
 
-            {/* Color Picker */}
             <div className="pt-2">
               <label className="block text-xs font-black text-slate-400 uppercase tracking-widest mb-3 flex items-center gap-2">
                 <Palette size={14} /> Post Color
@@ -540,23 +622,17 @@ const PostEditor: React.FC<PostEditorProps> = ({ onClose, onSubmit, authorName, 
                     onClick={() => setSelectedColor(color)}
                     style={{ backgroundColor: color }}
                     className={`h-10 w-10 rounded-full border-2 transition-all ${selectedColor === color ? 'border-cyan-600 scale-110 shadow-md' : 'border-black/10 hover:scale-105'}`}
-                    title={color}
                   />
                 ))}
               </div>
             </div>
-
           </div>
         </div>
         
-        {/* Safety Error Display */}
         {safetyError && (
-          <div className="mx-6 mb-2 p-3 bg-red-50 border border-red-200 rounded-xl flex items-center gap-3 animate-in slide-in-from-bottom-2">
-             <ShieldAlert className="text-red-500 flex-shrink-0" size={20} />
-             <div>
-               <p className="text-xs font-bold text-red-600 uppercase tracking-wide">Post Blocked</p>
-               <p className="text-sm text-red-700 font-medium leading-tight">{safetyError}</p>
-             </div>
+          <div className="mx-6 mb-2 p-3 bg-red-50 border border-red-200 rounded-xl flex items-center gap-3">
+             <ShieldAlert className="text-red-500" size={20} />
+             <p className="text-sm text-red-700 font-medium leading-tight">{safetyError}</p>
           </div>
         )}
 
@@ -564,7 +640,7 @@ const PostEditor: React.FC<PostEditorProps> = ({ onClose, onSubmit, authorName, 
           <button
             onClick={handleSubmit}
             disabled={(!content && !url && !videoBase64) || isFetchingLink || isCheckingSafety}
-            className="flex items-center gap-2 px-8 py-3 bg-cyan-600 text-white rounded-xl font-bold hover:bg-cyan-700 disabled:bg-slate-200 disabled:text-slate-400 transition-all shadow-lg active:scale-95"
+            className="flex items-center gap-2 px-8 py-3 bg-cyan-600 text-white rounded-xl font-bold hover:bg-cyan-700 disabled:opacity-50 shadow-lg active:scale-95"
           >
             {isCheckingSafety ? <Loader2 className="animate-spin" size={18} /> : (initialPost ? <><Save size={18} /> Update</> : <><Send size={18} /> Post</>)}
           </button>

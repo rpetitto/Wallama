@@ -18,6 +18,7 @@ export interface Post {
   content: string;
   authorName: string;
   authorId: string;
+  authorAvatar?: string; // Capture user photo
   createdAt: number;
   x: number;
   y: number;
@@ -28,10 +29,11 @@ export interface Post {
     title?: string;
     description?: string;
     image?: string;
-    caption?: string; // Added caption support
+    caption?: string; 
     videoBlob?: string; 
-    mimeType?: string; // For drive files
-    iconLink?: string; // For drive files
+    videoThumbnail?: string; 
+    mimeType?: string; 
+    iconLink?: string; 
   };
 }
 

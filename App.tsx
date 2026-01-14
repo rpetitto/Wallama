@@ -30,23 +30,19 @@ const App: React.FC = () => {
       if (wallIdFromUrl) {
         let wall: Wall | null = null;
         
-        // 1. Try to fetch by ID if it matches UUID format (legacy)
         if (/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(wallIdFromUrl)) {
              wall = await databaseService.getWallById(wallIdFromUrl);
         }
         
-        // 2. If not found by ID, try by Join Code (new deep link format)
         if (!wall) {
              wall = await databaseService.getWallByCode(wallIdFromUrl);
         }
 
         if (wall) {
-          // Only create guest if NOT logged in
           if (!parsedUser && (wall.privacyType === 'public' || wall.privacyType === 'link')) {
             const guest = createGuestUser();
             databaseService.joinWall(wall.id, guest.id, 'student');
           } else if (parsedUser) {
-            // Logged in user joining
             databaseService.joinWall(wall.id, parsedUser.id, parsedUser.role);
           }
           setActiveWallId(wall.id);
@@ -64,11 +60,8 @@ const App: React.FC = () => {
     if (currentUser.role === 'teacher') {
         walls = await databaseService.getTeacherWalls(currentUser.id);
     } else if (currentUser.role === 'student' && !currentUser.isGuest) {
-        // 1. Get walls joined previously (DB persistence)
         walls = await databaseService.getStudentWalls(currentUser.id);
         
-        // 2. Background Scan for Classroom Announcements
-        // We do this non-blocking to populate new shares
         const token = sessionStorage.getItem('google_access_token');
         if (token) {
             classroomService.findWallsFromAnnouncements(token).then(async (newIds) => {
@@ -77,21 +70,16 @@ const App: React.FC = () => {
                     const toFetch = newIds.filter(id => !existingIds.has(id));
                     
                     if (toFetch.length > 0) {
-                       // We can't batch fetch by ID in our current service easily without a new method
-                       // For MVP, we just rely on the user clicking the link once.
-                       // However, let's just add them to the list if we can fetch them.
                        const fetchedPromises = toFetch.map(id => databaseService.getWallById(id));
                        const fetched = await Promise.all(fetchedPromises);
                        const validFetched = fetched.filter(w => w !== null) as Wall[];
                        
                        if (validFetched.length > 0) {
                            setMyWalls(prev => {
-                               // Merge and dedupe
                                const currentIds = new Set(prev.map(p => p.id));
                                const novel = validFetched.filter(v => !currentIds.has(v.id));
                                return [...novel, ...prev];
                            });
-                           // Auto-join them in DB so we don't scan next time
                            validFetched.forEach(w => databaseService.joinWall(w.id, currentUser.id, 'student'));
                        }
                     }
@@ -139,7 +127,6 @@ const App: React.FC = () => {
   };
 
   const handleCreateWall = async (name: string, description: string) => {
-    // strict check: only teachers
     if (!user || user.role !== 'teacher') return;
     
     setIsSyncing(true);
@@ -172,6 +159,7 @@ const App: React.FC = () => {
       ...postData,
       authorId: user.id,
       authorName: user.name,
+      authorAvatar: user.avatar, // Captured user photo
       color: postData.color || 'bg-white',
     };
     return await databaseService.addPost(activeWallId, newPost);
@@ -219,7 +207,6 @@ const App: React.FC = () => {
         onBack={() => { 
             setActiveWallId(null); 
             window.history.replaceState({}, document.title, window.location.pathname); 
-            // Refresh dashboard list when returning
             if (user) loadWalls(user);
         }} 
         onAddPost={handleAddPost}
