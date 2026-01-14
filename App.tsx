@@ -28,7 +28,18 @@ const App: React.FC = () => {
       const wallIdFromUrl = urlParams.get('wall');
       
       if (wallIdFromUrl) {
-        const wall = await databaseService.getWallById(wallIdFromUrl);
+        let wall: Wall | null = null;
+        
+        // 1. Try to fetch by ID if it matches UUID format (legacy)
+        if (/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(wallIdFromUrl)) {
+             wall = await databaseService.getWallById(wallIdFromUrl);
+        }
+        
+        // 2. If not found by ID, try by Join Code (new deep link format)
+        if (!wall) {
+             wall = await databaseService.getWallByCode(wallIdFromUrl);
+        }
+
         if (wall) {
           // Only create guest if NOT logged in
           if (!parsedUser && (wall.privacyType === 'public' || wall.privacyType === 'link')) {
@@ -38,7 +49,7 @@ const App: React.FC = () => {
             // Logged in user joining
             databaseService.joinWall(wall.id, parsedUser.id, parsedUser.role);
           }
-          setActiveWallId(wallIdFromUrl);
+          setActiveWallId(wall.id);
         }
       }
 

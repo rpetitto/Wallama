@@ -4,7 +4,7 @@ import { Wall, Post as PostType, UserRole, ClassroomCourse } from '../types';
 import Post from './Post';
 import PostEditor from './PostEditor';
 import { ChevronLeft, Plus, Share2, Settings, X, Check, ZoomIn, ZoomOut, Maximize, Loader2, AlertCircle, LayoutGrid, Lock, Unlock, Image as ImageIcon, Copy } from 'lucide-react';
-import { WALL_GRADIENTS } from '../constants';
+import { WALL_GRADIENTS, POPULAR_EMOJIS } from '../constants';
 import { databaseService } from '../services/databaseService';
 import { classroomService } from '../services/classroomService';
 
@@ -33,6 +33,7 @@ const WallView: React.FC<WallViewProps> = ({
   
   const [showShareOverlay, setShowShareOverlay] = useState(false);
   const [showCopyToast, setShowCopyToast] = useState(false);
+  const [showEmojiPicker, setShowEmojiPicker] = useState(false);
   
   const [showClassroomModal, setShowClassroomModal] = useState(false);
   const [courses, setCourses] = useState<ClassroomCourse[]>([]);
@@ -97,6 +98,8 @@ const WallView: React.FC<WallViewProps> = ({
   }, [wall]);
 
   const syncWall = useCallback(async () => {
+    // Prevent sync if user interacted recently or if we just saved settings
+    // This calculation ensures that if lastInteractionTime is in the future (e.g. paused), we skip sync
     if (Date.now() - lastInteractionTime.current < 500) return;
 
     try {
@@ -382,16 +385,22 @@ const WallView: React.FC<WallViewProps> = ({
   const handleOpenSettings = () => {
     if (wall) setSettingsForm({ ...wall });
     setShowSettings(true);
+    setShowEmojiPicker(false);
   };
 
   const handleSaveSettings = () => {
+    // Delay next sync for 10 seconds to prevent race condition where old data overwrites new settings
+    // before the database update has fully propagated.
+    lastInteractionTime.current = Date.now() + 10000; 
+    
     onUpdateWall(settingsForm);
     if (wall) setWall({ ...wall, ...settingsForm });
     setShowSettings(false);
   };
 
   const handleCopyLink = () => {
-    navigator.clipboard.writeText(window.location.href);
+    const link = wall ? (window.location.origin + window.location.pathname + "?wall=" + wall.joinCode) : window.location.href;
+    navigator.clipboard.writeText(link);
     setShowCopyToast(true);
     setTimeout(() => setShowCopyToast(false), 2000);
   };
@@ -422,6 +431,9 @@ const WallView: React.FC<WallViewProps> = ({
 
   if (!wall) return null;
   const isTeacher = (userRole === 'teacher' && wall.teacherId === currentUserId);
+
+  // Generate Deeplink with Code
+  const wallDeepLink = window.location.origin + window.location.pathname + "?wall=" + wall.joinCode;
 
   return (
     <div 
@@ -517,12 +529,12 @@ const WallView: React.FC<WallViewProps> = ({
                 </button>
                 <div className="space-y-2">
                     <h3 className="text-2xl font-black text-slate-800 tracking-tight">Join this Wall</h3>
-                    <p className="text-slate-500 text-sm font-medium">Scan the QR code or use the code below.</p>
+                    <p className="text-slate-500 text-sm font-medium">Scan the QR code or use the link below.</p>
                 </div>
                 
                 <div className="bg-white p-4 rounded-3xl border-2 border-cyan-100 shadow-[0_0_40px_-10px_rgba(8,145,178,0.2)] inline-block">
                     <img 
-                        src={`https://api.qrserver.com/v1/create-qr-code/?size=250x250&data=${encodeURIComponent(window.location.origin + window.location.pathname + "?wall=" + wall.id)}&color=0891b2&bgcolor=ffffff`} 
+                        src={`https://api.qrserver.com/v1/create-qr-code/?size=250x250&data=${encodeURIComponent(wallDeepLink)}&color=0891b2&bgcolor=ffffff`} 
                         alt="QR Code" 
                         className="w-48 h-48 rounded-xl object-contain"
                     />
@@ -532,7 +544,7 @@ const WallView: React.FC<WallViewProps> = ({
                     <p className="text-[10px] font-bold text-slate-400 uppercase tracking-widest mb-1">Join Code</p>
                     <p className="text-4xl font-black text-cyan-600 tracking-widest">{wall.joinCode}</p>
                     <div className="absolute inset-0 flex items-center justify-center bg-white/80 opacity-0 group-hover:opacity-100 transition-opacity rounded-2xl">
-                        <span className="text-xs font-bold text-cyan-600 uppercase tracking-widest">Click to Copy</span>
+                        <span className="text-xs font-bold text-cyan-600 uppercase tracking-widest">Click to Copy Code</span>
                     </div>
                 </div>
 
@@ -628,23 +640,30 @@ const WallView: React.FC<WallViewProps> = ({
                 <h4 className="text-xs font-black text-slate-400 uppercase tracking-widest flex items-center gap-2"><ImageIcon size={14} /> Identity</h4>
                 <div className="grid grid-cols-[auto_1fr] gap-4">
                     <div className="space-y-2">
-                        <label className="text-xs font-bold text-slate-500 ml-1">Icon (Emoji)</label>
-                        <div className="h-16 w-16 bg-slate-100 rounded-2xl flex items-center justify-center text-3xl border border-slate-200">
-                             <input 
-                                type="text" 
-                                className="w-full h-full text-center bg-transparent outline-none cursor-pointer p-0 m-0"
-                                style={{ fontSize: '2rem' }} 
-                                value={settingsForm.icon || '📝'} 
-                                onChange={(e) => {
-                                  const val = e.target.value;
-                                  // Use Array.from to handle surrogate pairs (emojis) correctly
-                                  const chars = Array.from(val);
-                                  // Take the last entered character/emoji
-                                  const lastChar = chars[chars.length - 1];
-                                  setSettingsForm({...settingsForm, icon: lastChar || '📝'});
-                                }}
-                                onFocus={(e) => e.target.select()}
-                             />
+                        <label className="text-xs font-bold text-slate-500 ml-1">Icon</label>
+                        <div className="relative">
+                            <button 
+                                onClick={() => setShowEmojiPicker(!showEmojiPicker)}
+                                className="h-16 w-16 bg-slate-100 rounded-2xl flex items-center justify-center text-3xl border border-slate-200 hover:bg-slate-200 transition-colors"
+                            >
+                                {settingsForm.icon || '📝'}
+                            </button>
+                            {showEmojiPicker && (
+                                <div className="absolute top-full mt-2 left-0 z-50 bg-white rounded-2xl shadow-xl border border-slate-100 p-2 w-64 h-64 overflow-y-auto custom-scrollbar grid grid-cols-6 gap-1">
+                                    {POPULAR_EMOJIS.map(emoji => (
+                                        <button 
+                                            key={emoji}
+                                            onClick={() => {
+                                                setSettingsForm({...settingsForm, icon: emoji});
+                                                setShowEmojiPicker(false);
+                                            }}
+                                            className="h-9 w-9 flex items-center justify-center rounded-lg hover:bg-slate-100 text-lg transition-colors"
+                                        >
+                                            {emoji}
+                                        </button>
+                                    ))}
+                                </div>
+                            )}
                         </div>
                     </div>
                     <div className="space-y-4">
