@@ -1,12 +1,12 @@
 
 export const WALL_COLORS = [
-  '#99ffff',
-  '#99ccff',
-  '#ccccff',
-  '#669999',
-  '#006699',
-  '#0099cc',
-  '#666666'
+  '#FFCCD4', // Pastel Pink
+  '#FFE1CC', // Pastel Peach
+  '#FFFFCC', // Pastel Yellow
+  '#DDFFCC', // Pastel Lime
+  '#CCFFE5', // Pastel Mint
+  '#DCCCFF', // Pastel Lavender
+  '#FFCCF6'  // Pastel Rose
 ];
 
 export const WALL_GRADIENTS = [
