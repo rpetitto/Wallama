@@ -126,7 +126,7 @@ const WallView: React.FC<WallViewProps> = ({
       } else {
         setError("Wall not found.");
       }
-    } catch (err) {
+    } catch (err: any) {
       console.error("Sync error:", err);
     } finally {
       setIsSyncing(false);
@@ -357,7 +357,7 @@ const WallView: React.FC<WallViewProps> = ({
 
     const savedPost = await onAddPost({ ...data, x: slot.x, y: slot.y });
     if (savedPost) {
-      optimisticPosts.current.delete(tempId);
+      optimisticPosts.current.delete(tempId as string);
       optimisticPosts.current.set(savedPost.id, savedPost);
       scheduleOptimisticCleanup(savedPost.id);
       setWall(prev => {

@@ -1,8 +1,8 @@
 
 import React, { useState, useRef, useEffect } from 'react';
 import { PostType, Post } from '../types';
-import { X, Image as ImageIcon, Link as LinkIcon, Gift, Video, Sparkles, Send, Camera, StopCircle, Upload, Loader2, Type, Search, Check, Palette, MessageSquare } from 'lucide-react';
-import { refinePostContent } from '../services/geminiService';
+import { X, Image as ImageIcon, Link as LinkIcon, Gift, Video, Sparkles, Send, Camera, StopCircle, Upload, Loader2, Type, Search, Check, Palette, MessageSquare, ShieldAlert } from 'lucide-react';
+import { refinePostContent, checkContentSafety } from '../services/geminiService';
 import { WALL_COLORS } from '../constants';
 
 interface PostEditorProps {
@@ -24,6 +24,8 @@ const PostEditor: React.FC<PostEditorProps> = ({ onClose, onSubmit, authorName }
   const [isRefining, setIsRefining] = useState(false);
   const [isFetchingLink, setIsFetchingLink] = useState(false);
   const [linkMetadata, setLinkMetadata] = useState<any>(null);
+  const [isCheckingSafety, setIsCheckingSafety] = useState(false);
+  const [safetyError, setSafetyError] = useState<string | null>(null);
   
   const [gifSearch, setGifSearch] = useState('');
   const [gifs, setGifs] = useState<any[]>([]);
@@ -124,9 +126,10 @@ const PostEditor: React.FC<PostEditorProps> = ({ onClose, onSubmit, authorName }
     setIsRecording(false);
   };
 
-  const handleSubmit = () => {
+  const handleSubmit = async () => {
     let submissionContent = content;
     let submissionMetadata: any = {};
+    setSafetyError(null);
 
     if (type === 'video') submissionContent = videoBase64 || '';
     else if (type === 'image' || type === 'gif') submissionContent = url;
@@ -141,6 +144,43 @@ const PostEditor: React.FC<PostEditorProps> = ({ onClose, onSubmit, authorName }
     if (caption) {
       submissionMetadata.caption = caption;
     }
+
+    // --- SAFETY CHECK START ---
+    setIsCheckingSafety(true);
+    
+    // 1. Aggregate Text
+    const textToCheckParts = [];
+    if (type === 'text') textToCheckParts.push(content);
+    if (caption) textToCheckParts.push(caption);
+    
+    // For links, check title and description
+    if (type === 'link' && linkMetadata) {
+      if (linkMetadata.title) textToCheckParts.push(linkMetadata.title);
+      if (linkMetadata.description) textToCheckParts.push(linkMetadata.description);
+    }
+    // Check URL string itself
+    if (url) textToCheckParts.push(url);
+
+    const textToAnalyze = textToCheckParts.join(' ');
+
+    // 2. Identify Image (if any)
+    // Only send Base64 image data (User uploads). Remote URLs (GIFs) are checked via text/metadata mostly.
+    let imageToAnalyze = undefined;
+    if (type === 'image' && url.startsWith('data:')) {
+        imageToAnalyze = url;
+    }
+
+    // 3. Perform Check
+    if (textToAnalyze.length > 0 || imageToAnalyze) {
+      const safetyResult = await checkContentSafety(textToAnalyze, imageToAnalyze);
+      if (!safetyResult.isSafe) {
+        setIsCheckingSafety(false);
+        setSafetyError(safetyResult.reason || "Content flagged as inappropriate.");
+        return; // STOP SUBMISSION
+      }
+    }
+    setIsCheckingSafety(false);
+    // --- SAFETY CHECK END ---
     
     onSubmit({
       type,
@@ -175,7 +215,7 @@ const PostEditor: React.FC<PostEditorProps> = ({ onClose, onSubmit, authorName }
             ].map((tab) => (
               <button
                 key={tab.id}
-                onClick={() => { setType(tab.id as PostType); setContent(''); setUrl(''); setLinkMetadata(null); }}
+                onClick={() => { setType(tab.id as PostType); setContent(''); setUrl(''); setLinkMetadata(null); setSafetyError(null); }}
                 className={`flex-1 min-w-[70px] flex flex-col items-center gap-1 py-3 px-2 rounded-lg transition-all ${type === tab.id ? 'bg-white shadow-sm text-cyan-600' : 'text-slate-500 hover:bg-black/5'}`}
               >
                 <tab.icon size={20} />
@@ -189,7 +229,7 @@ const PostEditor: React.FC<PostEditorProps> = ({ onClose, onSubmit, authorName }
               <div className="relative">
                 <textarea
                   value={content}
-                  onChange={(e) => setContent(e.target.value)}
+                  onChange={(e) => { setContent(e.target.value); setSafetyError(null); }}
                   placeholder="Type something amazing..."
                   className="w-full h-40 p-4 bg-white/50 border border-black/5 rounded-2xl focus:ring-4 focus:ring-cyan-500/20 focus:border-cyan-500 outline-none resize-none text-lg text-slate-900 placeholder:text-slate-400"
                 />
@@ -210,7 +250,7 @@ const PostEditor: React.FC<PostEditorProps> = ({ onClose, onSubmit, authorName }
                     type="text"
                     value={url}
                     onBlur={() => fetchLinkMetadata(url)}
-                    onChange={(e) => setUrl(e.target.value)}
+                    onChange={(e) => { setUrl(e.target.value); setSafetyError(null); }}
                     placeholder="https://example.com"
                     className="w-full p-4 bg-white/50 border border-black/5 rounded-xl outline-none text-slate-900 placeholder:text-slate-400 focus:ring-4 focus:ring-cyan-500/20"
                   />
@@ -314,7 +354,7 @@ const PostEditor: React.FC<PostEditorProps> = ({ onClose, onSubmit, authorName }
               <input
                 type="text"
                 value={caption}
-                onChange={(e) => setCaption(e.target.value)}
+                onChange={(e) => { setCaption(e.target.value); setSafetyError(null); }}
                 placeholder="Add a description..."
                 className="w-full px-4 py-3 bg-white/50 border border-black/5 rounded-xl outline-none focus:ring-4 focus:ring-cyan-500/20 text-sm text-slate-900 placeholder:text-slate-400"
               />
@@ -339,14 +379,25 @@ const PostEditor: React.FC<PostEditorProps> = ({ onClose, onSubmit, authorName }
 
           </div>
         </div>
+        
+        {/* Safety Error Display */}
+        {safetyError && (
+          <div className="mx-6 mb-2 p-3 bg-red-50 border border-red-200 rounded-xl flex items-center gap-3 animate-in slide-in-from-bottom-2">
+             <ShieldAlert className="text-red-500 flex-shrink-0" size={20} />
+             <div>
+               <p className="text-xs font-bold text-red-600 uppercase tracking-wide">Post Blocked</p>
+               <p className="text-sm text-red-700 font-medium leading-tight">{safetyError}</p>
+             </div>
+          </div>
+        )}
 
         <div className="p-6 border-t border-black/5 bg-white/50 backdrop-blur-sm flex justify-end">
           <button
             onClick={handleSubmit}
-            disabled={(!content && !url && !videoBase64) || isFetchingLink}
+            disabled={(!content && !url && !videoBase64) || isFetchingLink || isCheckingSafety}
             className="flex items-center gap-2 px-8 py-3 bg-cyan-600 text-white rounded-xl font-bold hover:bg-cyan-700 disabled:bg-slate-200 disabled:text-slate-400 transition-all shadow-lg active:scale-95"
           >
-            Post to Wallama <Send size={18} />
+            {isCheckingSafety ? <Loader2 className="animate-spin" size={18} /> : <><Send size={18} /> Post</>}
           </button>
         </div>
       </div>
