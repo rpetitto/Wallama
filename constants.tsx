@@ -1,0 +1,24 @@
+
+export const WALL_COLORS = [
+  'bg-white',
+  'bg-cyan-50',
+  'bg-sky-100',
+  'bg-teal-50',
+  'bg-blue-50',
+  'bg-indigo-50',
+  'bg-slate-50'
+];
+
+export const WALL_GRADIENTS = [
+  'from-cyan-400 via-cyan-500 to-blue-600', // Matches Llama Logo
+  'from-sky-400 to-indigo-500',
+  'from-teal-400 to-emerald-500',
+  'from-orange-300 via-amber-400 to-yellow-300',
+  'from-rose-400 via-pink-500 to-fuchsia-500',
+  'from-violet-500 via-purple-500 to-indigo-600',
+  'from-slate-700 via-slate-800 to-slate-900'
+];
+
+export const GENERATE_JOIN_CODE = () => {
+  return Math.random().toString(36).substring(2, 8).toUpperCase();
+};

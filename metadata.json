@@ -1,0 +1,8 @@
+{
+  "name": "Wallama",
+  "description": "Wallama: A collaborative wall for teachers and students to share thoughts on a live digital canvas.",
+  "requestFramePermissions": [
+    "camera",
+    "microphone"
+  ]
+}
