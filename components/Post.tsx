@@ -1,11 +1,12 @@
 
 import React, { useState, useRef } from 'react';
 import { Post as PostType } from '../types';
-import { Trash2, GripHorizontal, ExternalLink, Clock, User, Quote } from 'lucide-react';
+import { Trash2, GripHorizontal, ExternalLink, Clock, User, Quote, Pencil } from 'lucide-react';
 
 interface PostProps {
   post: PostType;
   onDelete: (id: string) => void;
+  onEdit?: (id: string) => void;
   onMove: (id: string, x: number, y: number) => void;
   onMoveEnd?: (id: string, x: number, y: number) => void;
   isOwner: boolean;
@@ -14,7 +15,7 @@ interface PostProps {
   zoom: number;
 }
 
-const Post: React.FC<PostProps> = ({ post, onDelete, onMove, onMoveEnd, isOwner, snapToGrid, isWallAnonymous, zoom }) => {
+const Post: React.FC<PostProps> = ({ post, onDelete, onEdit, onMove, onMoveEnd, isOwner, snapToGrid, isWallAnonymous, zoom }) => {
   const [isHovered, setIsHovered] = useState(false);
   const [isDragging, setIsDragging] = useState(false);
   const dragStartPos = useRef({ x: 0, y: 0 });
@@ -135,6 +136,14 @@ const Post: React.FC<PostProps> = ({ post, onDelete, onMove, onMoveEnd, isOwner,
           <span className="text-xs font-bold text-slate-700 truncate max-w-[120px]">{displayName}</span>
         </div>
         <div className="flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
+          {isOwner && onEdit && (
+             <button 
+              onClick={(e) => { e.stopPropagation(); onEdit(post.id); }}
+              className="p-1.5 text-slate-400 hover:text-cyan-600 hover:bg-cyan-50 rounded-lg transition-colors"
+            >
+              <Pencil size={14} />
+            </button>
+          )}
           {isOwner && (
             <button 
               onClick={(e) => { e.stopPropagation(); onDelete(post.id); }}

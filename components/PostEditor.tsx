@@ -1,7 +1,7 @@
 
 import React, { useState, useRef, useEffect } from 'react';
 import { PostType, Post } from '../types';
-import { X, Image as ImageIcon, Link as LinkIcon, Gift, Video, Sparkles, Send, Camera, StopCircle, Upload, Loader2, Type, Search, Check, Palette, MessageSquare, ShieldAlert } from 'lucide-react';
+import { X, Image as ImageIcon, Link as LinkIcon, Gift, Video, Sparkles, Send, Camera, StopCircle, Upload, Loader2, Type, Search, Check, Palette, MessageSquare, ShieldAlert, Save } from 'lucide-react';
 import { refinePostContent, checkContentSafety } from '../services/geminiService';
 import { WALL_COLORS } from '../constants';
 
@@ -9,11 +9,12 @@ interface PostEditorProps {
   onClose: () => void;
   onSubmit: (post: Partial<Post>) => void;
   authorName: string;
+  initialPost?: Post;
 }
 
 const GIPHY_API_KEY = 'eo5zSu2rUveZJB4kxO3S1Rv57KkMbhiQ'; 
 
-const PostEditor: React.FC<PostEditorProps> = ({ onClose, onSubmit, authorName }) => {
+const PostEditor: React.FC<PostEditorProps> = ({ onClose, onSubmit, authorName, initialPost }) => {
   const [type, setType] = useState<PostType>('text');
   const [content, setContent] = useState('');
   const [caption, setCaption] = useState('');
@@ -34,6 +35,31 @@ const PostEditor: React.FC<PostEditorProps> = ({ onClose, onSubmit, authorName }
   const videoRef = useRef<HTMLVideoElement>(null);
   const mediaRecorderRef = useRef<MediaRecorder | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
+
+  // Initialize state if editing
+  useEffect(() => {
+    if (initialPost) {
+      setType(initialPost.type);
+      setSelectedColor(initialPost.color || WALL_COLORS[0]);
+      
+      if (initialPost.metadata?.caption) {
+        setCaption(initialPost.metadata.caption);
+      }
+
+      if (initialPost.type === 'text') {
+        setContent(initialPost.content);
+      } else if (initialPost.type === 'video') {
+         // If video content is base64, load it
+         setVideoBase64(initialPost.content);
+      } else if (initialPost.type === 'link') {
+         setUrl(initialPost.content);
+         setLinkMetadata(initialPost.metadata);
+      } else {
+         // Image/GIF
+         setUrl(initialPost.content);
+      }
+    }
+  }, [initialPost]);
 
   const searchGifs = async (query: string) => {
     setIsSearchingGifs(true);
@@ -144,6 +170,11 @@ const PostEditor: React.FC<PostEditorProps> = ({ onClose, onSubmit, authorName }
     if (caption) {
       submissionMetadata.caption = caption;
     }
+    
+    // Preserve existing metadata if updating
+    if (initialPost && initialPost.metadata) {
+        submissionMetadata = { ...initialPost.metadata, ...submissionMetadata };
+    }
 
     // --- SAFETY CHECK START ---
     setIsCheckingSafety(true);
@@ -199,7 +230,7 @@ const PostEditor: React.FC<PostEditorProps> = ({ onClose, onSubmit, authorName }
       >
         <div className="p-6 border-b border-black/5 flex items-center justify-between bg-white/50 backdrop-blur-sm">
           <div>
-            <h3 className="text-xl font-bold text-slate-800">Add to Wallama</h3>
+            <h3 className="text-xl font-bold text-slate-800">{initialPost ? 'Edit Post' : 'Add to Wallama'}</h3>
             <p className="text-sm text-slate-600 font-medium">Author: {authorName}</p>
           </div>
           <button onClick={onClose} className="p-2 hover:bg-black/5 rounded-full transition-colors text-slate-500">
@@ -402,7 +433,7 @@ const PostEditor: React.FC<PostEditorProps> = ({ onClose, onSubmit, authorName }
             disabled={(!content && !url && !videoBase64) || isFetchingLink || isCheckingSafety}
             className="flex items-center gap-2 px-8 py-3 bg-cyan-600 text-white rounded-xl font-bold hover:bg-cyan-700 disabled:bg-slate-200 disabled:text-slate-400 transition-all shadow-lg active:scale-95"
           >
-            {isCheckingSafety ? <Loader2 className="animate-spin" size={18} /> : <><Send size={18} /> Post</>}
+            {isCheckingSafety ? <Loader2 className="animate-spin" size={18} /> : (initialPost ? <><Save size={18} /> Update</> : <><Send size={18} /> Post</>)}
           </button>
         </div>
       </div>

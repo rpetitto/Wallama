@@ -207,6 +207,29 @@ export const databaseService = {
     }
   },
 
+  async updatePostContent(postId: string, post: Partial<Post>): Promise<Post | null> {
+    try {
+      const updates: any = {};
+      if (post.content !== undefined) updates.content = post.content;
+      if (post.type !== undefined) updates.type = post.type;
+      if (post.color !== undefined) updates.color = post.color;
+      if (post.metadata !== undefined) updates.metadata = post.metadata;
+
+      const { data, error } = await supabase
+        .from('posts')
+        .update(updates)
+        .eq('id', postId)
+        .select()
+        .single();
+
+      if (error) throw error;
+      return mapPostFromDB(data);
+    } catch (err) {
+      console.error("SQL updatePostContent failed:", err);
+      return null;
+    }
+  },
+
   async updateWall(wallId: string, updates: Partial<Wall>): Promise<boolean> {
     try {
       const sqlUpdates: any = {};

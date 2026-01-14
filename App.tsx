@@ -177,6 +177,11 @@ const App: React.FC = () => {
     return await databaseService.addPost(activeWallId, newPost);
   };
 
+  const handleEditPost = async (postId: string, postData: Partial<Post>) => {
+    if (!user || !activeWallId) return null;
+    return await databaseService.updatePostContent(postId, postData);
+  };
+
   const handleDeletePost = async (postId: string) => {
     await databaseService.deletePost(postId);
   };
@@ -218,6 +223,7 @@ const App: React.FC = () => {
             if (user) loadWalls(user);
         }} 
         onAddPost={handleAddPost}
+        onEditPost={handleEditPost}
         onDeletePost={handleDeletePost}
         onMovePost={handleMovePost}
         onUpdateWall={handleUpdateWall}
