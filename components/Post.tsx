@@ -1,7 +1,7 @@
 
 import React, { useState, useRef } from 'react';
 import { Post as PostType } from '../types';
-import { Trash2, GripHorizontal, ExternalLink, Clock, User, Quote, Pencil } from 'lucide-react';
+import { Trash2, GripHorizontal, ExternalLink, Clock, User, Quote, Pencil, HardDrive } from 'lucide-react';
 
 interface PostProps {
   post: PostType;
@@ -87,6 +87,30 @@ const Post: React.FC<PostProps> = ({ post, onDelete, onEdit, onMove, onMoveEnd, 
               )}
             </div>
           </a>
+        );
+      case 'drive':
+        return (
+            <a href={post.metadata?.url} target="_blank" rel="noopener noreferrer" className="block bg-white/80 rounded-xl overflow-hidden hover:bg-white transition-all border border-black/5 group shadow-sm">
+                <div className="p-4 flex items-start gap-3">
+                    {post.metadata?.image ? (
+                        <img src={post.metadata.image} className="w-12 h-12 rounded-lg object-cover bg-slate-100" alt="Preview" referrerPolicy="no-referrer" />
+                    ) : (
+                        <div className="w-12 h-12 rounded-lg bg-slate-100 flex items-center justify-center">
+                            <HardDrive className="text-slate-400" size={24} />
+                        </div>
+                    )}
+                    <div className="flex-1 min-w-0">
+                        <div className="flex items-center gap-2 mb-0.5">
+                            {post.metadata?.iconLink && <img src={post.metadata.iconLink} className="w-4 h-4" alt="" />}
+                            <span className="text-[10px] font-black text-slate-400 uppercase tracking-wider">Google Drive</span>
+                        </div>
+                        <p className="text-sm font-bold text-slate-900 leading-tight truncate">{post.metadata?.title || "Drive File"}</p>
+                        <div className="flex items-center gap-1 mt-1 text-cyan-600 text-xs font-bold group-hover:underline">
+                            Open File <ExternalLink size={10} />
+                        </div>
+                    </div>
+                </div>
+            </a>
         );
       case 'video':
         // content holds the base64 string

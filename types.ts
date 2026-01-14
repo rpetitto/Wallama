@@ -10,7 +10,7 @@ export interface User {
   isGuest?: boolean;
 }
 
-export type PostType = 'text' | 'image' | 'link' | 'gif' | 'video' | 'ai';
+export type PostType = 'text' | 'image' | 'link' | 'gif' | 'video' | 'ai' | 'drive';
 
 export interface Post {
   id: string;
@@ -30,6 +30,8 @@ export interface Post {
     image?: string;
     caption?: string; // Added caption support
     videoBlob?: string; 
+    mimeType?: string; // For drive files
+    iconLink?: string; // For drive files
   };
 }
 

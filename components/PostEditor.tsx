@@ -1,9 +1,12 @@
 
 import React, { useState, useRef, useEffect } from 'react';
 import { PostType, Post } from '../types';
-import { X, Image as ImageIcon, Link as LinkIcon, Gift, Video, Sparkles, Send, Camera, StopCircle, Upload, Loader2, Type, Search, Check, Palette, MessageSquare, ShieldAlert, Save } from 'lucide-react';
+import { X, Image as ImageIcon, Link as LinkIcon, Gift, Video, Sparkles, Send, Camera, StopCircle, Upload, Loader2, Type, Search, Check, Palette, MessageSquare, ShieldAlert, Save, HardDrive, FileText } from 'lucide-react';
 import { refinePostContent, checkContentSafety } from '../services/geminiService';
 import { WALL_COLORS } from '../constants';
+
+// Declare global google for OAuth
+declare const google: any;
 
 interface PostEditorProps {
   onClose: () => void;
@@ -13,6 +16,7 @@ interface PostEditorProps {
 }
 
 const GIPHY_API_KEY = 'eo5zSu2rUveZJB4kxO3S1Rv57KkMbhiQ'; 
+const GOOGLE_CLIENT_ID = "6888240288-5v0p6nsoi64q1puv1vpvk1njd398ra8b.apps.googleusercontent.com";
 
 const PostEditor: React.FC<PostEditorProps> = ({ onClose, onSubmit, authorName, initialPost }) => {
   const [type, setType] = useState<PostType>('text');
@@ -28,13 +32,21 @@ const PostEditor: React.FC<PostEditorProps> = ({ onClose, onSubmit, authorName, 
   const [isCheckingSafety, setIsCheckingSafety] = useState(false);
   const [safetyError, setSafetyError] = useState<string | null>(null);
   
+  // Giphy State
   const [gifSearch, setGifSearch] = useState('');
   const [gifs, setGifs] = useState<any[]>([]);
   const [isSearchingGifs, setIsSearchingGifs] = useState(false);
 
+  // Drive State
+  const [driveFiles, setDriveFiles] = useState<any[]>([]);
+  const [isDriveLoading, setIsDriveLoading] = useState(false);
+  const [driveToken, setDriveToken] = useState<string | null>(null);
+  const [driveSearch, setDriveSearch] = useState('');
+
   const videoRef = useRef<HTMLVideoElement>(null);
   const mediaRecorderRef = useRef<MediaRecorder | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
+  const driveTokenClient = useRef<any>(null);
 
   // Initialize state if editing
   useEffect(() => {
@@ -49,17 +61,73 @@ const PostEditor: React.FC<PostEditorProps> = ({ onClose, onSubmit, authorName, 
       if (initialPost.type === 'text') {
         setContent(initialPost.content);
       } else if (initialPost.type === 'video') {
-         // If video content is base64, load it
          setVideoBase64(initialPost.content);
       } else if (initialPost.type === 'link') {
          setUrl(initialPost.content);
          setLinkMetadata(initialPost.metadata);
+      } else if (initialPost.type === 'drive') {
+         setUrl(initialPost.content);
+         setLinkMetadata(initialPost.metadata);
       } else {
-         // Image/GIF
          setUrl(initialPost.content);
       }
     }
   }, [initialPost]);
+
+  // Init Google OAuth for Drive
+  useEffect(() => {
+    if (typeof google !== 'undefined' && google.accounts && google.accounts.oauth2) {
+      driveTokenClient.current = google.accounts.oauth2.initTokenClient({
+        client_id: GOOGLE_CLIENT_ID,
+        scope: 'https://www.googleapis.com/auth/drive.readonly',
+        callback: (response: any) => {
+          if (response.access_token) {
+            setDriveToken(response.access_token);
+            fetchDriveFiles(response.access_token);
+          }
+        },
+      });
+    }
+  }, []);
+
+  const handleDriveAuth = () => {
+    // If we already have a session token that might have drive scope, try it first?
+    // Actually, safest is to request the scope explicitly here.
+    if (driveTokenClient.current) {
+        driveTokenClient.current.requestAccessToken();
+    } else {
+        alert("Google services not ready. Please wait a moment.");
+    }
+  };
+
+  const fetchDriveFiles = async (token: string, query: string = '') => {
+    setIsDriveLoading(true);
+    try {
+        let q = "trashed = false and mimeType != 'application/vnd.google-apps.folder'";
+        if (query) {
+            q += ` and name contains '${query}'`;
+        }
+        
+        const res = await fetch(`https://www.googleapis.com/drive/v3/files?q=${encodeURIComponent(q)}&pageSize=20&fields=files(id,name,thumbnailLink,webViewLink,mimeType,iconLink,webContentLink)`, {
+            headers: { Authorization: `Bearer ${token}` }
+        });
+        
+        if (res.ok) {
+            const data = await res.json();
+            setDriveFiles(data.files || []);
+        }
+    } catch (e) {
+        console.error(e);
+    } finally {
+        setIsDriveLoading(false);
+    }
+  };
+
+  useEffect(() => {
+    if (type === 'drive' && !driveToken && !initialPost) {
+        // Just show the auth button, don't auto trigger popup as it might be blocked
+    }
+  }, [type]);
 
   const searchGifs = async (query: string) => {
     setIsSearchingGifs(true);
@@ -152,6 +220,18 @@ const PostEditor: React.FC<PostEditorProps> = ({ onClose, onSubmit, authorName, 
     setIsRecording(false);
   };
 
+  const handleSelectDriveFile = (file: any) => {
+      // Use webViewLink as the main content URL for viewing
+      setUrl(file.webViewLink);
+      setLinkMetadata({
+          title: file.name,
+          mimeType: file.mimeType,
+          image: file.thumbnailLink, // Drive provides generic thumbnails usually
+          iconLink: file.iconLink,
+          url: file.webViewLink
+      });
+  };
+
   const handleSubmit = async () => {
     let submissionContent = content;
     let submissionMetadata: any = {};
@@ -163,6 +243,10 @@ const PostEditor: React.FC<PostEditorProps> = ({ onClose, onSubmit, authorName, 
       submissionContent = url;
       submissionMetadata = { ...(linkMetadata || { url, title: url }) };
     }
+    else if (type === 'drive') {
+        submissionContent = url;
+        submissionMetadata = linkMetadata;
+    }
 
     if (!submissionContent && type !== 'text') return;
     if (type === 'text' && !content) return;
@@ -171,42 +255,31 @@ const PostEditor: React.FC<PostEditorProps> = ({ onClose, onSubmit, authorName, 
       submissionMetadata.caption = caption;
     }
     
-    // Preserve existing metadata if updating
     if (initialPost && initialPost.metadata) {
         submissionMetadata = { ...initialPost.metadata, ...submissionMetadata };
     }
 
     // --- SAFETY CHECK START ---
     setIsCheckingSafety(true);
-    
-    // 1. Aggregate Text
     const textToCheckParts = [];
     if (type === 'text') textToCheckParts.push(content);
     if (caption) textToCheckParts.push(caption);
-    
-    // For links, check title and description
-    if (type === 'link' && linkMetadata) {
+    if ((type === 'link' || type === 'drive') && linkMetadata) {
       if (linkMetadata.title) textToCheckParts.push(linkMetadata.title);
       if (linkMetadata.description) textToCheckParts.push(linkMetadata.description);
     }
-    // Check URL string itself
     if (url) textToCheckParts.push(url);
-
     const textToAnalyze = textToCheckParts.join(' ');
-
-    // 2. Identify Image (if any)
     let imageToAnalyze = undefined;
     if (type === 'image' && url.startsWith('data:')) {
         imageToAnalyze = url;
     }
-
-    // 3. Perform Check
     if (textToAnalyze.length > 0 || imageToAnalyze) {
       const safetyResult = await checkContentSafety(textToAnalyze, imageToAnalyze);
       if (!safetyResult.isSafe) {
         setIsCheckingSafety(false);
         setSafetyError(safetyResult.reason || "Content flagged as inappropriate.");
-        return; // STOP SUBMISSION
+        return; 
       }
     }
     setIsCheckingSafety(false);
@@ -245,13 +318,22 @@ const PostEditor: React.FC<PostEditorProps> = ({ onClose, onSubmit, authorName, 
               { id: 'text', icon: Type, label: 'Text' },
               { id: 'image', icon: ImageIcon, label: 'Image' },
               { id: 'link', icon: LinkIcon, label: 'Link' },
+              { id: 'drive', icon: HardDrive, label: 'Drive' },
               { id: 'gif', icon: Gift, label: 'GIF' },
               { id: 'video', icon: Video, label: 'Video' }
             ].map((tab) => (
               <button
                 key={tab.id}
-                onClick={() => { setType(tab.id as PostType); setContent(''); setUrl(''); setLinkMetadata(null); setSafetyError(null); }}
-                className={`flex-1 min-w-[70px] flex flex-col items-center gap-1 py-3 px-2 rounded-lg transition-all ${type === tab.id ? 'bg-white shadow-sm text-cyan-600' : 'text-slate-500 hover:bg-black/5'}`}
+                onClick={() => { 
+                    setType(tab.id as PostType); 
+                    setContent(''); 
+                    if (tab.id !== 'drive') { // preserve drive selection if switching back briefly? No, clean slate is safer
+                       setUrl(''); 
+                       setLinkMetadata(null);
+                    }
+                    setSafetyError(null); 
+                }}
+                className={`flex-1 min-w-[60px] flex flex-col items-center gap-1 py-3 px-2 rounded-lg transition-all ${type === tab.id ? 'bg-white shadow-sm text-cyan-600' : 'text-slate-500 hover:bg-black/5'}`}
               >
                 <tab.icon size={20} />
                 <span className="text-[10px] font-bold uppercase tracking-widest">{tab.label}</span>
@@ -303,6 +385,62 @@ const PostEditor: React.FC<PostEditorProps> = ({ onClose, onSubmit, authorName, 
               </div>
             )}
 
+            {type === 'drive' && (
+                <div className="space-y-4">
+                    {!driveToken ? (
+                        <div className="text-center py-10 bg-white/50 rounded-2xl border border-black/5">
+                            <HardDrive size={48} className="mx-auto text-slate-300 mb-4" />
+                            <p className="text-slate-600 font-medium mb-4">Connect Google Drive to select files.</p>
+                            <button onClick={handleDriveAuth} className="px-6 py-2 bg-slate-800 text-white rounded-full font-bold hover:bg-slate-900 transition-colors">
+                                Connect Drive
+                            </button>
+                        </div>
+                    ) : (
+                        <div className="space-y-3">
+                            <div className="relative">
+                                <input 
+                                  type="text" 
+                                  placeholder="Search Drive..." 
+                                  value={driveSearch}
+                                  onChange={(e) => setDriveSearch(e.target.value)}
+                                  onKeyDown={(e) => e.key === 'Enter' && fetchDriveFiles(driveToken, driveSearch)}
+                                  className="w-full pl-10 pr-4 py-3 bg-white/50 border border-black/5 rounded-xl outline-none focus:ring-2 focus:ring-cyan-500/20"
+                                />
+                                <Search size={18} className="absolute left-3 top-3.5 text-slate-400" />
+                                {isDriveLoading && <Loader2 size={18} className="absolute right-3 top-3.5 animate-spin text-cyan-500" />}
+                            </div>
+                            
+                            <div className="grid grid-cols-2 gap-2 max-h-60 overflow-y-auto custom-scrollbar p-1">
+                                {driveFiles.map(file => (
+                                    <div 
+                                      key={file.id} 
+                                      onClick={() => handleSelectDriveFile(file)}
+                                      className={`p-3 bg-white rounded-xl border cursor-pointer transition-all flex items-center gap-3 ${url === file.webViewLink ? 'border-cyan-600 ring-2 ring-cyan-500/20' : 'border-black/5 hover:bg-white/80'}`}
+                                    >
+                                        {file.thumbnailLink ? (
+                                            <img src={file.thumbnailLink} className="w-10 h-10 object-cover rounded-lg" alt="Thumb" referrerPolicy="no-referrer" />
+                                        ) : (
+                                            <img src={file.iconLink} className="w-8 h-8" alt="Icon" />
+                                        )}
+                                        <div className="overflow-hidden">
+                                            <p className="text-xs font-bold text-slate-800 truncate">{file.name}</p>
+                                            <p className="text-[10px] text-slate-500 truncate">Google Drive</p>
+                                        </div>
+                                    </div>
+                                ))}
+                            </div>
+                            
+                            {linkMetadata && url && (
+                                <div className="p-3 bg-cyan-50 rounded-xl border border-cyan-100 flex items-center gap-3">
+                                    <Check size={18} className="text-cyan-600" />
+                                    <span className="text-xs font-bold text-cyan-800">Selected: {linkMetadata.title}</span>
+                                </div>
+                            )}
+                        </div>
+                    )}
+                </div>
+            )}
+
             {type === 'gif' && (
               <div className="space-y-4">
                 <div className="flex gap-2 w-full">
@@ -340,11 +478,6 @@ const PostEditor: React.FC<PostEditorProps> = ({ onClose, onSubmit, authorName, 
                       )}
                     </button>
                   ))}
-                  {!gifs.length && !isSearchingGifs && (
-                     <div className="col-span-3 py-8 text-center text-slate-400 text-sm">
-                       Try searching for something fun!
-                     </div>
-                  )}
                 </div>
               </div>
             )}
