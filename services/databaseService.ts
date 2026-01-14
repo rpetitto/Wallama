@@ -21,6 +21,7 @@ const mapWallFromDB = (dbWall: any): Wall => {
     background: dbWall.background || 'from-indigo-500 via-purple-500 to-pink-500',
     snapToGrid: dbWall.snap_to_grid ?? true,
     isAnonymous: dbWall.is_anonymous ?? false,
+    isFrozen: dbWall.is_frozen ?? false,
     privacyType: dbWall.privacy_type || 'link',
     icon: dbWall.icon || '📝',
     posts: (dbWall.posts || []).map(mapPostFromDB)
@@ -63,7 +64,6 @@ export const databaseService = {
 
   async getStudentWalls(userId: string): Promise<Wall[]> {
     try {
-      // 1. Get IDs of walls the student has joined
       const { data: memberData, error: memberError } = await supabase
         .from('wall_members')
         .select('wall_id, last_accessed_at')
@@ -74,7 +74,6 @@ export const databaseService = {
 
       const wallIds = memberData.map(m => m.wall_id);
 
-      // 2. Fetch the walls
       const { data: wallsData, error: wallsError } = await supabase
         .from('walls')
         .select(`*, posts (*)`)
@@ -90,8 +89,6 @@ export const databaseService = {
 
   async joinWall(wallId: string, userId: string, role: string = 'student'): Promise<void> {
     try {
-      // Upsert into wall_members to track that this user joined this wall
-      // The 'last_accessed_at' helps sort them recently
       await supabase
         .from('wall_members')
         .upsert({ 
@@ -149,6 +146,7 @@ export const databaseService = {
           background: wall.background,
           snap_to_grid: wall.snapToGrid,
           is_anonymous: wall.isAnonymous,
+          is_frozen: wall.isFrozen,
           privacy_type: wall.privacyType,
           icon: wall.icon || '📝'
         }])
@@ -176,9 +174,7 @@ export const databaseService = {
         if (!zError && maxZData && maxZData.length > 0) {
           nextZ = maxZData[0].z_index + 1;
         }
-      } catch (e) {
-        // Ignore z-index read errors
-      }
+      } catch (e) {}
 
       const fullPayload = {
         wall_id: wallId,
@@ -237,6 +233,7 @@ export const databaseService = {
       if (updates.description !== undefined) sqlUpdates.description = updates.description;
       if (updates.background !== undefined) sqlUpdates.background = updates.background;
       if (updates.isAnonymous !== undefined) sqlUpdates.is_anonymous = updates.isAnonymous;
+      if (updates.isFrozen !== undefined) sqlUpdates.is_frozen = updates.isFrozen;
       if (updates.snapToGrid !== undefined) sqlUpdates.snap_to_grid = updates.snapToGrid;
       if (updates.privacyType !== undefined) sqlUpdates.privacy_type = updates.privacyType;
       if (updates.icon !== undefined) sqlUpdates.icon = updates.icon;
@@ -245,6 +242,19 @@ export const databaseService = {
       return !error;
     } catch (err) {
       return false;
+    }
+  },
+
+  async deleteWall(wallId: string): Promise<boolean> {
+    try {
+        // Posts should be deleted via Cascade in DB, but let's be safe if requested
+        await supabase.from('posts').delete().eq('wall_id', wallId);
+        await supabase.from('wall_members').delete().eq('wall_id', wallId);
+        const { error } = await supabase.from('walls').delete().eq('id', wallId);
+        return !error;
+    } catch (err) {
+        console.error("SQL deleteWall failed:", err);
+        return false;
     }
   },
 

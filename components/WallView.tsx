@@ -3,7 +3,7 @@ import React, { useState, useEffect, useCallback, useRef } from 'react';
 import { Wall, Post as PostType, UserRole, ClassroomCourse } from '../types';
 import Post from './Post';
 import PostEditor from './PostEditor';
-import { ChevronLeft, Plus, Share2, Settings, X, Check, ZoomIn, ZoomOut, Maximize, Loader2, AlertCircle, LayoutGrid, Lock, Unlock, Image as ImageIcon, Copy, Search, School } from 'lucide-react';
+import { ChevronLeft, Plus, Share2, Settings, X, Check, ZoomIn, ZoomOut, Maximize, Loader2, AlertCircle, LayoutGrid, Lock, Unlock, Image as ImageIcon, Copy, Search, School, Trash2, ShieldAlert } from 'lucide-react';
 import { WALL_GRADIENTS, POPULAR_EMOJIS } from '../constants';
 import { databaseService } from '../services/databaseService';
 import { classroomService } from '../services/classroomService';
@@ -30,6 +30,7 @@ const WallView: React.FC<WallViewProps> = ({
   const [showSettings, setShowSettings] = useState(false);
   const [isSyncing, setIsSyncing] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
   
   const [settingsForm, setSettingsForm] = useState<Partial<Wall>>({});
   
@@ -49,7 +50,7 @@ const WallView: React.FC<WallViewProps> = ({
   const containerRef = useRef<HTMLDivElement>(null);
   const hasInitialZoomed = useRef(false);
   
-  // Refs for event handlers to access fresh state without dependencies
+  // High-frequency refs to prevent stuttering
   const zoomRef = useRef(zoom);
   const panRef = useRef(pan);
   const startZoomRef = useRef<number>(1); 
@@ -160,28 +161,32 @@ const WallView: React.FC<WallViewProps> = ({
   const handleCanvasMouseUp = () => { isPanning.current = false; };
 
   /**
-   * Helper to zoom relative to a screen coordinate point
+   * Ref-based zoom logic for high performance
    */
-  const zoomAtPoint = (newZoom: number, screenX: number, screenY: number) => {
+  const performZoomAtPoint = (newZoom: number, screenX: number, screenY: number) => {
     const el = containerRef.current;
     if (!el) return;
     const rect = el.getBoundingClientRect();
     const targetX = screenX - rect.left;
     const targetY = screenY - rect.top;
     
-    const currentZoom = zoomRef.current;
-    const currentPan = panRef.current;
+    const curZoom = zoomRef.current;
+    const curPan = panRef.current;
     
-    // World coordinates before zoom
-    const worldX = (targetX - currentPan.x) / currentZoom;
-    const worldY = (targetY - currentPan.y) / currentZoom;
+    // Convert target to world coordinates
+    const worldX = (targetX - curPan.x) / curZoom;
+    const worldY = (targetY - curPan.y) / curZoom;
     
-    // Calculate new pan to keep world point under the same screen coordinate
-    const newPanX = targetX - (worldX * newZoom);
-    const newPanY = targetY - (worldY * newZoom);
+    const nextPanX = targetX - (worldX * newZoom);
+    const nextPanY = targetY - (worldY * newZoom);
     
+    // Update state once
     setZoom(newZoom);
-    setPan({ x: newPanX, y: newPanY });
+    setPan({ x: nextPanX, y: nextPanY });
+    
+    // Sync refs immediately for next event loop
+    zoomRef.current = newZoom;
+    panRef.current = { x: nextPanX, y: nextPanY };
   };
 
   const handleManualZoom = (direction: 1 | -1) => {
@@ -192,55 +197,53 @@ const WallView: React.FC<WallViewProps> = ({
     const centerY = rect.top + rect.height / 2;
     
     const nextZoom = Math.min(Math.max(zoomRef.current + (direction * 0.15), 0.05), 5);
-    zoomAtPoint(nextZoom, centerX, centerY);
+    performZoomAtPoint(nextZoom, centerX, centerY);
   };
 
-  /**
-   * Native event listeners for Wheel (Trackpad & Mouse)
-   */
   useEffect(() => {
     const el = containerRef.current;
     if (!el) return;
 
-    const handleWheel = (e: WheelEvent) => {
+    const handleWheelNative = (e: WheelEvent) => {
       e.preventDefault(); 
 
       // Zoom if Ctrl (Pinch) or Alt (Option) is pressed
       if (e.ctrlKey || e.metaKey || e.altKey) {
-        const zoomStep = 0.004; 
-        const delta = -e.deltaY * zoomStep;
+        const zoomSensitivity = 0.003; 
+        const delta = -e.deltaY * zoomSensitivity;
         const nextZoom = Math.min(Math.max(zoomRef.current + delta, 0.05), 5);
-        zoomAtPoint(nextZoom, e.clientX, e.clientY);
+        performZoomAtPoint(nextZoom, e.clientX, e.clientY);
       } 
-      // Regular Pan for trackpad 2-finger scroll or mouse wheel
+      // Regular Pan for trackpad/mouse scroll
       else {
-        setPan(prev => ({ 
-          x: prev.x - e.deltaX, 
-          y: prev.y - e.deltaY 
-        }));
+        const nextPan = {
+            x: panRef.current.x - e.deltaX,
+            y: panRef.current.y - e.deltaY
+        };
+        setPan(nextPan);
+        panRef.current = nextPan;
       }
     };
     
-    // Safari-specific gesture support
-    const handleGestureStart = (e: any) => {
+    const handleGestureStartNative = (e: any) => {
       e.preventDefault();
       startZoomRef.current = zoomRef.current;
     };
 
-    const handleGestureChange = (e: any) => {
+    const handleGestureChangeNative = (e: any) => {
       e.preventDefault();
       const nextZoom = Math.min(Math.max(startZoomRef.current * e.scale, 0.05), 5);
-      zoomAtPoint(nextZoom, e.clientX, e.clientY);
+      performZoomAtPoint(nextZoom, e.clientX, e.clientY);
     };
     
-    el.addEventListener('wheel', handleWheel, { passive: false });
-    el.addEventListener('gesturestart', handleGestureStart as any);
-    el.addEventListener('gesturechange', handleGestureChange as any);
+    el.addEventListener('wheel', handleWheelNative, { passive: false });
+    el.addEventListener('gesturestart', handleGestureStartNative as any);
+    el.addEventListener('gesturechange', handleGestureChangeNative as any);
 
     return () => { 
-      el.removeEventListener('wheel', handleWheel); 
-      el.removeEventListener('gesturestart', handleGestureStart as any);
-      el.removeEventListener('gesturechange', handleGestureChange as any);
+      el.removeEventListener('wheel', handleWheelNative); 
+      el.removeEventListener('gesturestart', handleGestureStartNative as any);
+      el.removeEventListener('gesturechange', handleGestureChangeNative as any);
     };
   }, []);
 
@@ -267,15 +270,12 @@ const WallView: React.FC<WallViewProps> = ({
       const centerY = (e.touches[0].clientY + e.touches[1].clientY) / 2;
       const scaleFactor = dist / lastTouchDistance.current;
       const nextZoom = Math.min(Math.max(initialZoom.current * scaleFactor, 0.05), 5);
-      zoomAtPoint(nextZoom, centerX, centerY);
+      performZoomAtPoint(nextZoom, centerX, centerY);
     }
   };
 
   const handleTouchEnd = () => { isPanning.current = false; lastTouchDistance.current = null; };
 
-  /**
-   * Simplified slot logic: Alternate Right/Bottom to keep 1:1 ratio
-   */
   const findSmartSlot = (posts: PostType[]) => {
     if (posts.length === 0) return { x: 100, y: 100 };
     const POST_W = 300, POST_H = 250, GAP = 50;
@@ -285,12 +285,13 @@ const WallView: React.FC<WallViewProps> = ({
     const maxY = Math.max(...posts.map(p => p.y + POST_H));
     const totalW = maxX - minX;
     const totalH = maxY - minY;
-    // To keep it 1:1, if wide, add to bottom. If tall, add to right.
+    // Strictly follow 1:1 balance
     if (totalW >= totalH) return { x: minX, y: maxY + GAP };
     return { x: maxX + GAP, y: minY };
   };
 
   const handlePostMove = (id: string, x: number, y: number) => {
+    if (wall?.isFrozen) return;
     lastInteractionTime.current = Date.now();
     setWall(prev => {
       if (!prev) return prev;
@@ -306,11 +307,13 @@ const WallView: React.FC<WallViewProps> = ({
   };
 
   const handlePostMoveEnd = async (id: string, x: number, y: number) => {
+    if (wall?.isFrozen) return;
     lastInteractionTime.current = Date.now();
     await onMovePost(id, x, y);
   };
 
   const handlePostSubmit = async (data: Partial<PostType>) => {
+    if (wall?.isFrozen) return;
     if (editingPostId) {
         lastInteractionTime.current = Date.now();
         setWall(prev => prev ? ({ ...prev, posts: prev.posts.map(p => p.id === editingPostId ? { ...p, ...data } : p) }) : null);
@@ -344,23 +347,15 @@ const WallView: React.FC<WallViewProps> = ({
     }
   };
 
-  const handleEditClick = (postId: string) => { setEditingPostId(postId); setShowEditor(true); };
+  const handleEditClick = (postId: string) => { if (wall?.isFrozen) return; setEditingPostId(postId); setShowEditor(true); };
   const handleOpenSettings = () => { if (wall) setSettingsForm({ ...wall }); setShowSettings(true); setShowEmojiPicker(false); setEmojiSearch(''); };
   const handleSaveSettings = () => { lastInteractionTime.current = Date.now() + 10000; onUpdateWall(settingsForm); if (wall) setWall({ ...wall, ...settingsForm }); setShowSettings(false); };
   const handleCopyLink = () => { const link = wall ? (window.location.origin + window.location.pathname + "?wall=" + wall.joinCode) : window.location.href; navigator.clipboard.writeText(link); setShowCopyToast(true); setTimeout(() => setShowCopyToast(false), 2000); };
+  const handleShare = () => { setShowShareOverlay(true); };
 
-  // Fix: implement handleShare
-  const handleShare = () => {
-    setShowShareOverlay(true);
-  };
-
-  // Fix: implement handleClassroomShareOpen
   const handleClassroomShareOpen = async () => {
     const token = sessionStorage.getItem('google_access_token');
-    if (!token) {
-      alert("No Google Access Token found. Please re-login.");
-      return;
-    }
+    if (!token) { alert("No Google Access Token found. Please re-login."); return; }
     setIsSyncing(true);
     const fetchedCourses = await classroomService.listCourses(token);
     setCourses(fetchedCourses);
@@ -369,39 +364,39 @@ const WallView: React.FC<WallViewProps> = ({
     setIsSyncing(false);
   };
 
-  // Helper for multi-course selection in sharing
   const toggleCourseSelection = (id: string) => {
     const newSet = new Set(selectedCourses);
-    if (newSet.has(id)) newSet.delete(id);
-    else newSet.add(id);
+    if (newSet.has(id)) newSet.delete(id); else newSet.add(id);
     setSelectedCourses(newSet);
   };
 
-  // Handler for sharing the wall link to selected classroom courses
   const handleShareToClassroom = async () => {
     const token = sessionStorage.getItem('google_access_token');
     if (!token || !wall || selectedCourses.size === 0) return;
-
     setIsSharingToClassroom(true);
     const courseIds = Array.from(selectedCourses);
     let allSuccessful = true;
-    
     for (const cid of courseIds) {
       const ok = await classroomService.shareWallToCourse(token, cid, wall);
       if (!ok) allSuccessful = false;
     }
-
     setIsSharingToClassroom(false);
     if (allSuccessful) {
       setShareSuccess(true);
-      setTimeout(() => {
-        setShareSuccess(false);
-        setShowClassroomModal(false);
-        setSelectedCourses(new Set());
-      }, 2000);
-    } else {
-      alert("Some shares failed. Please check your Classroom permissions.");
+      setTimeout(() => { setShareSuccess(false); setShowClassroomModal(false); setSelectedCourses(new Set()); }, 2000);
     }
+  };
+
+  const handleDeleteWall = async () => {
+    if (!wall) return;
+    setIsSyncing(true);
+    const success = await databaseService.deleteWall(wall.id);
+    if (success) {
+        onBack();
+    } else {
+        alert("Failed to delete wall. Please try again.");
+    }
+    setIsSyncing(false);
   };
 
   if (error) return (
@@ -432,7 +427,7 @@ const WallView: React.FC<WallViewProps> = ({
   return (
     <div 
       ref={containerRef}
-      className={`relative min-h-screen w-full bg-gradient-to-br ${wall.background} overflow-hidden flex flex-col`}
+      className={`relative min-h-screen w-full bg-gradient-to-br ${wall.background} overflow-hidden flex flex-col transition-colors duration-700 ${wall.isFrozen ? 'grayscale-[0.1] contrast-[0.9]' : ''}`}
       style={{ 
         backgroundImage: wall.background.startsWith('from') ? '' : wall.background,
         background: wall.background.startsWith('from') ? undefined : wall.background,
@@ -452,7 +447,10 @@ const WallView: React.FC<WallViewProps> = ({
           <div className="flex items-center gap-3">
              <div className="h-10 w-10 bg-white/30 backdrop-blur-md rounded-xl flex items-center justify-center text-xl shadow-sm border border-white/20">{wall.icon || '📝'}</div>
              <div>
-                <h2 className="text-xl font-extrabold text-white drop-shadow-md leading-tight">{wall.name}</h2>
+                <div className="flex items-center gap-2">
+                    <h2 className="text-xl font-extrabold text-white drop-shadow-md leading-tight">{wall.name}</h2>
+                    {wall.isFrozen && <div className="px-2 py-0.5 bg-indigo-600/60 backdrop-blur-md rounded-full flex items-center gap-1 border border-white/20"><Lock size={10} className="text-white"/><span className="text-[10px] font-black text-white uppercase tracking-wider">Frozen</span></div>}
+                </div>
                 <p className="text-[10px] text-white/70 font-bold uppercase tracking-widest">Code: {wall.joinCode}</p>
              </div>
           </div>
@@ -463,7 +461,7 @@ const WallView: React.FC<WallViewProps> = ({
         </div>
       </header>
 
-      <main id="canvas-root" className="flex-1 relative cursor-grab active:cursor-grabbing overflow-hidden">
+      <main id="canvas-root" className={`flex-1 relative overflow-hidden ${wall.isFrozen ? 'cursor-default' : 'cursor-grab active:cursor-grabbing'}`}>
         <div 
           className="absolute origin-top-left transition-transform duration-75"
           style={{ transform: `translate(${pan.x}px, ${pan.y}px) scale(${zoom})` }}
@@ -484,6 +482,7 @@ const WallView: React.FC<WallViewProps> = ({
                 isOwner={post.authorId === currentUserId || isTeacher} 
                 snapToGrid={wall.snapToGrid}
                 isWallAnonymous={wall.isAnonymous}
+                isWallFrozen={wall.isFrozen}
                 zoom={zoom}
               />
             ))}
@@ -499,9 +498,11 @@ const WallView: React.FC<WallViewProps> = ({
         <button onClick={zoomFit} className="p-2 hover:bg-slate-100 rounded-lg text-slate-600 flex items-center gap-2 font-bold text-xs"><Maximize size={18} /> Fit</button>
       </div>
 
-      <button onClick={() => { setEditingPostId(null); setShowEditor(true); }} className="fixed bottom-10 right-10 z-[100] h-20 w-20 bg-cyan-600 text-white rounded-full shadow-2xl hover:scale-110 transition-all flex items-center justify-center border-4 border-white/20 active:scale-95">
-        <Plus size={40} />
-      </button>
+      {!wall.isFrozen && (
+        <button onClick={() => { setEditingPostId(null); setShowEditor(true); }} className="fixed bottom-10 right-10 z-[100] h-20 w-20 bg-cyan-600 text-white rounded-full shadow-2xl hover:scale-110 transition-all flex items-center justify-center border-4 border-white/20 active:scale-95">
+            <Plus size={40} />
+        </button>
+      )}
 
       {showCopyToast && (
         <div className="fixed top-24 left-1/2 -translate-x-1/2 z-[300] bg-slate-900/90 text-white px-6 py-3 rounded-full shadow-2xl flex items-center gap-3 animate-in slide-in-from-top-4 fade-in duration-300 backdrop-blur-md border border-white/10">
@@ -611,6 +612,17 @@ const WallView: React.FC<WallViewProps> = ({
               </section>
               <section className="space-y-4">
                 <h4 className="text-xs font-black text-slate-400 uppercase tracking-widest flex items-center gap-2"><Lock size={14} /> Privacy & Access</h4>
+                
+                <div className="flex items-center justify-between p-4 bg-slate-50 rounded-2xl border border-slate-100">
+                    <div className="flex flex-col">
+                        <span className="font-bold text-slate-700">Freeze Wall</span>
+                        <span className="text-xs text-slate-500">Prevent any posting or editing</span>
+                    </div>
+                    <button onClick={() => setSettingsForm({ ...settingsForm, isFrozen: !settingsForm.isFrozen })} className={`w-12 h-6 rounded-full relative transition-colors ${settingsForm.isFrozen ? 'bg-indigo-600' : 'bg-slate-300'}`}>
+                        <div className={`absolute top-1 w-4 h-4 bg-white rounded-full transition-all ${settingsForm.isFrozen ? 'left-7' : 'left-1'}`} />
+                    </button>
+                </div>
+
                 <div className="flex items-center justify-between p-4 bg-slate-50 rounded-2xl border border-slate-100">
                     <div className="flex flex-col">
                         <span className="font-bold text-slate-700">Anonymous Posting</span>
@@ -620,12 +632,22 @@ const WallView: React.FC<WallViewProps> = ({
                         <div className={`absolute top-1 w-4 h-4 bg-white rounded-full transition-all ${settingsForm.isAnonymous ? 'left-7' : 'left-1'}`} />
                     </button>
                 </div>
+
                 <div className="bg-slate-50 p-4 rounded-2xl border border-slate-100 space-y-4">
                     <div className="flex items-center gap-4">
                         <button onClick={() => setSettingsForm({...settingsForm, privacyType: 'link'})} className={`flex-1 py-3 rounded-xl font-bold text-sm flex items-center justify-center gap-2 transition-all ${settingsForm.privacyType !== 'private' ? 'bg-white shadow-md text-cyan-600' : 'text-slate-400 hover:bg-slate-200'}`}><Unlock size={16} /> Open Access</button>
                         <button onClick={() => setSettingsForm({...settingsForm, privacyType: 'private'})} className={`flex-1 py-3 rounded-xl font-bold text-sm flex items-center justify-center gap-2 transition-all ${settingsForm.privacyType === 'private' ? 'bg-white shadow-md text-cyan-600' : 'text-slate-400 hover:bg-slate-200'}`}><Lock size={16} /> Restricted</button>
                     </div>
                 </div>
+              </section>
+
+              <section className="pt-6 border-t border-red-50">
+                <button 
+                    onClick={() => setShowDeleteConfirm(true)}
+                    className="w-full p-4 bg-red-50 text-red-600 rounded-2xl font-bold hover:bg-red-100 transition-colors flex items-center justify-center gap-2"
+                >
+                    <Trash2 size={20} /> Delete Wall
+                </button>
               </section>
             </div>
             <div className="p-6 border-t border-slate-100 bg-slate-50 flex justify-end gap-3">
@@ -636,58 +658,51 @@ const WallView: React.FC<WallViewProps> = ({
         </div>
       )}
 
+      {/* Delete Confirmation Overlay */}
+      {showDeleteConfirm && (
+          <div className="fixed inset-0 z-[500] bg-slate-900/60 backdrop-blur-md flex items-center justify-center p-4">
+              <div className="bg-white rounded-[2rem] p-8 max-w-sm w-full text-center space-y-6 shadow-2xl animate-in zoom-in-95">
+                  <div className="h-20 w-20 bg-red-100 rounded-full flex items-center justify-center mx-auto text-red-600 mb-2">
+                      <ShieldAlert size={40} />
+                  </div>
+                  <div>
+                    <h3 className="text-2xl font-black text-slate-800 tracking-tight">Are you sure?</h3>
+                    <p className="text-slate-500 text-sm font-medium mt-2">This will delete the wall and all its posts forever. This action cannot be undone.</p>
+                  </div>
+                  <div className="flex gap-4">
+                      <button onClick={() => setShowDeleteConfirm(false)} className="flex-1 py-4 font-bold text-slate-500 bg-slate-100 rounded-2xl hover:bg-slate-200 transition-colors">No, Keep it</button>
+                      <button onClick={handleDeleteWall} className="flex-1 py-4 font-black text-white bg-red-600 rounded-2xl hover:bg-red-700 shadow-lg shadow-red-200 transition-all active:scale-95">Yes, Delete</button>
+                  </div>
+              </div>
+          </div>
+      )}
+
       {/* Classroom Share Modal */}
       {showClassroomModal && (
         <div className="fixed inset-0 z-[400] bg-slate-900/60 backdrop-blur-md flex items-center justify-center p-4 animate-in fade-in duration-200">
           <div className="bg-white rounded-[2rem] shadow-2xl p-8 max-w-lg w-full space-y-6 relative">
             <button onClick={() => setShowClassroomModal(false)} className="absolute top-6 right-6 p-2 hover:bg-slate-100 rounded-full text-slate-400 transition-colors"><X size={24} /></button>
-            
             <div className="flex items-center gap-4">
-                <div className="p-3 rounded-2xl bg-green-50">
-                    <img src="https://www.gstatic.com/classroom/logo_square_48.svg" className="w-10 h-10" alt="Classroom" />
-                </div>
+                <div className="p-3 rounded-2xl bg-green-50"><img src="https://www.gstatic.com/classroom/logo_square_48.svg" className="w-10 h-10" alt="Classroom" /></div>
                 <div>
                     <h3 className="text-2xl font-black text-slate-800 tracking-tight">Post to Classroom</h3>
                     <p className="text-slate-500 text-sm font-medium">Select courses to post an announcement.</p>
                 </div>
             </div>
-
             <div className="space-y-2 max-h-60 overflow-y-auto custom-scrollbar p-1">
                 {courses.map(course => (
-                    <div 
-                      key={course.id} 
-                      onClick={() => toggleCourseSelection(course.id)}
-                      className={`p-4 rounded-2xl border-2 transition-all cursor-pointer flex items-center justify-between ${selectedCourses.has(course.id) ? 'border-green-500 bg-green-50' : 'border-slate-100 hover:border-slate-200 bg-white'}`}
-                    >
+                    <div key={course.id} onClick={() => toggleCourseSelection(course.id)} className={`p-4 rounded-2xl border-2 transition-all cursor-pointer flex items-center justify-between ${selectedCourses.has(course.id) ? 'border-green-500 bg-green-50' : 'border-slate-100 hover:border-slate-200 bg-white'}`}>
                         <div className="flex items-center gap-3">
                             <School size={20} className={selectedCourses.has(course.id) ? 'text-green-600' : 'text-slate-400'} />
-                            <div>
-                                <p className="font-bold text-slate-800">{course.name}</p>
-                                {course.section && <p className="text-xs text-slate-500">{course.section}</p>}
-                            </div>
+                            <div><p className="font-bold text-slate-800">{course.name}</p>{course.section && <p className="text-xs text-slate-500">{course.section}</p>}</div>
                         </div>
                         {selectedCourses.has(course.id) && <Check size={20} className="text-green-600" />}
                     </div>
                 ))}
-                {courses.length === 0 && (
-                    <div className="text-center py-10 text-slate-400">
-                        <p>No active courses found.</p>
-                    </div>
-                )}
             </div>
-
             <div className="pt-4 border-t border-slate-100 flex gap-4">
-                <button 
-                  onClick={() => setShowClassroomModal(false)} 
-                  className="flex-1 py-4 text-slate-500 font-bold hover:bg-slate-100 rounded-2xl transition-colors"
-                >
-                    Cancel
-                </button>
-                <button 
-                  onClick={handleShareToClassroom}
-                  disabled={selectedCourses.size === 0 || isSharingToClassroom || shareSuccess}
-                  className={`flex-[2] py-4 rounded-2xl font-black flex items-center justify-center gap-2 shadow-lg transition-all active:scale-95 ${shareSuccess ? 'bg-green-500 text-white' : 'bg-slate-900 text-white hover:bg-slate-800 disabled:bg-slate-200'}`}
-                >
+                <button onClick={() => setShowClassroomModal(false)} className="flex-1 py-4 text-slate-500 font-bold hover:bg-slate-100 rounded-2xl transition-colors">Cancel</button>
+                <button onClick={handleShareToClassroom} disabled={selectedCourses.size === 0 || isSharingToClassroom || shareSuccess} className={`flex-[2] py-4 rounded-2xl font-black flex items-center justify-center gap-2 shadow-lg transition-all active:scale-95 ${shareSuccess ? 'bg-green-500 text-white' : 'bg-slate-900 text-white hover:bg-slate-800 disabled:bg-slate-200'}`}>
                     {isSharingToClassroom ? <Loader2 className="animate-spin" size={20} /> : (shareSuccess ? <><Check size={20} /> Posted!</> : 'Post to Selected')}
                 </button>
             </div>

@@ -1,7 +1,7 @@
 
 import React, { useState, useRef } from 'react';
 import { Post as PostType } from '../types';
-import { Trash2, GripHorizontal, ExternalLink, Clock, User, Quote, Pencil, HardDrive } from 'lucide-react';
+import { Trash2, GripHorizontal, ExternalLink, Clock, User, Quote, Pencil, HardDrive, Lock } from 'lucide-react';
 
 interface PostProps {
   post: PostType;
@@ -12,21 +12,20 @@ interface PostProps {
   isOwner: boolean;
   snapToGrid?: boolean;
   isWallAnonymous?: boolean;
+  isWallFrozen?: boolean;
   zoom: number;
 }
 
-const Post: React.FC<PostProps> = ({ post, onDelete, onEdit, onMove, onMoveEnd, isOwner, snapToGrid, isWallAnonymous, zoom }) => {
+const Post: React.FC<PostProps> = ({ post, onDelete, onEdit, onMove, onMoveEnd, isOwner, snapToGrid, isWallAnonymous, isWallFrozen, zoom }) => {
   const [isHovered, setIsHovered] = useState(false);
   const [isDragging, setIsDragging] = useState(false);
   const dragStartPos = useRef({ x: 0, y: 0 });
-  const postStartPos = useRef({ x: 0, y: 0 });
+  const postStartPos = useRef({ x: post.x, y: post.y });
   const currentPos = useRef({ x: post.x, y: post.y });
 
   const handleMouseDown = (e: React.MouseEvent) => {
-    // STOP PROPAGATION to prevent the WallView canvas from panning when clicking a post
     e.stopPropagation();
-
-    if (!isOwner) return;
+    if (!isOwner || isWallFrozen) return;
     if ((e.target as HTMLElement).closest('button, video, a')) return;
 
     setIsDragging(true);
@@ -39,7 +38,6 @@ const Post: React.FC<PostProps> = ({ post, onDelete, onEdit, onMove, onMoveEnd, 
   };
 
   const handleMouseMove = (e: MouseEvent) => {
-    // Calculate delta taking zoom into account
     const dx = (e.clientX - dragStartPos.current.x) / zoom;
     const dy = (e.clientY - dragStartPos.current.y) / zoom;
     
@@ -113,7 +111,6 @@ const Post: React.FC<PostProps> = ({ post, onDelete, onEdit, onMove, onMoveEnd, 
             </a>
         );
       case 'video':
-        // content holds the base64 string
         return (
           <div className="relative group rounded-lg overflow-hidden mb-2 bg-black aspect-video">
             <video src={post.content} controls className="w-full h-full" />
@@ -132,9 +129,8 @@ const Post: React.FC<PostProps> = ({ post, onDelete, onEdit, onMove, onMoveEnd, 
   };
 
   const displayName = isWallAnonymous ? 'Anonymous' : post.authorName;
-  
-  // Handle both legacy classes (bg-white) and new hex codes
   const isHexColor = post.color?.startsWith('#');
+  
   const containerStyle: React.CSSProperties = {
     left: post.x,
     top: post.y,
@@ -142,7 +138,7 @@ const Post: React.FC<PostProps> = ({ post, onDelete, onEdit, onMove, onMoveEnd, 
     backgroundColor: isHexColor ? post.color : undefined
   };
   
-  const containerClass = `post-container absolute p-4 w-[300px] rounded-2xl shadow-lg border border-black/5 transition-all duration-75 ${!isHexColor ? post.color : ''} group select-none ${isDragging ? 'shadow-2xl z-[9999] scale-[1.02] cursor-grabbing' : isOwner ? 'cursor-grab' : 'cursor-default'} hover:shadow-2xl`;
+  const containerClass = `post-container absolute p-4 w-[300px] rounded-2xl shadow-lg border border-black/5 transition-all duration-75 ${!isHexColor ? post.color : ''} group select-none ${isDragging ? 'shadow-2xl z-[9999] scale-[1.02] cursor-grabbing' : (isOwner && !isWallFrozen ? 'cursor-grab' : 'cursor-default')} hover:shadow-2xl`;
 
   return (
     <div 
@@ -160,7 +156,8 @@ const Post: React.FC<PostProps> = ({ post, onDelete, onEdit, onMove, onMoveEnd, 
           <span className="text-xs font-bold text-slate-700 truncate max-w-[120px]">{displayName}</span>
         </div>
         <div className="flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
-          {isOwner && onEdit && (
+          {isWallFrozen && <Lock size={14} className="text-slate-400 mr-2" />}
+          {isOwner && onEdit && !isWallFrozen && (
              <button 
               onClick={(e) => { e.stopPropagation(); onEdit(post.id); }}
               className="p-1.5 text-slate-400 hover:text-cyan-600 hover:bg-cyan-50 rounded-lg transition-colors"
@@ -168,7 +165,7 @@ const Post: React.FC<PostProps> = ({ post, onDelete, onEdit, onMove, onMoveEnd, 
               <Pencil size={14} />
             </button>
           )}
-          {isOwner && (
+          {isOwner && !isWallFrozen && (
             <button 
               onClick={(e) => { e.stopPropagation(); onDelete(post.id); }}
               className="p-1.5 text-slate-400 hover:text-red-500 hover:bg-red-50 rounded-lg transition-colors"
@@ -176,7 +173,7 @@ const Post: React.FC<PostProps> = ({ post, onDelete, onEdit, onMove, onMoveEnd, 
               <Trash2 size={14} />
             </button>
           )}
-          {isOwner && (
+          {isOwner && !isWallFrozen && (
             <div className="p-1.5 text-slate-400">
               <GripHorizontal size={16} />
             </div>
@@ -186,8 +183,6 @@ const Post: React.FC<PostProps> = ({ post, onDelete, onEdit, onMove, onMoveEnd, 
 
       <div className="min-h-[40px]">
         {renderContent()}
-        
-        {/* Caption Section */}
         {post.metadata?.caption && (
           <div className="mt-3 pt-3 border-t border-black/5">
             <p className="text-sm text-slate-700 font-medium italic flex gap-2">
