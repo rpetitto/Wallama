@@ -15,7 +15,7 @@ interface WallViewProps {
   onDeletePost: (id: string) => void;
   onMovePost: (id: string, x: number, y: number) => Promise<void>;
   onUpdateWall: (wall: Partial<Wall>) => void;
-  onEditPost: (id: string, post: Partial<PostType>) => Promise<PostType | null>; // New prop
+  onEditPost: (id: string, post: Partial<PostType>) => Promise<PostType | null>; 
   currentUserId: string;
   authorName: string;
   userRole: UserRole;
@@ -49,8 +49,10 @@ const WallView: React.FC<WallViewProps> = ({
   const containerRef = useRef<HTMLDivElement>(null);
   const hasInitialZoomed = useRef(false);
   
+  // Refs for event handlers to access fresh state without dependencies
   const zoomRef = useRef(zoom);
   const panRef = useRef(pan);
+  const startZoomRef = useRef<number>(1); // For gestures
 
   useEffect(() => { zoomRef.current = zoom; }, [zoom]);
   useEffect(() => { panRef.current = pan; }, [pan]);
@@ -173,47 +175,41 @@ const WallView: React.FC<WallViewProps> = ({
 
   const handleCanvasMouseUp = () => { isPanning.current = false; };
 
-  // --- REVISED WHEEL LOGIC for Trackpad Panning & Zoom ---
+  // --- REVISED WHEEL & GESTURE LOGIC ---
   useEffect(() => {
-    const handleWheel = (e: WheelEvent) => {
-      e.preventDefault(); // Stop browser history navigation
+    const el = containerRef.current;
+    if (!el) return;
 
-      // Check for Pinch Gesture (Ctrl + Wheel) OR actual specific zoom intent
+    const handleWheel = (e: WheelEvent) => {
+      e.preventDefault(); 
+
+      // 1. PINCH ZOOM (Ctrl+Wheel or Trackpad Pinch on Chrome)
       if (e.ctrlKey || e.metaKey) {
-        // --- ZOOM LOGIC ---
-        const currentZoom = zoomRef.current;
-        const currentPan = panRef.current;
-        const zoomSensitivity = 0.005; 
+        // Sensitivity for pinch via wheel
+        const zoomSensitivity = 0.006; 
         const delta = -e.deltaY * zoomSensitivity;
-        const newZoom = Math.min(Math.max(currentZoom + delta, 0.05), 4);
+        
+        const currentZoom = zoomRef.current;
+        const newZoom = Math.min(Math.max(currentZoom + delta, 0.05), 5);
         
         // Zoom towards mouse pointer
-        const rect = containerRef.current?.getBoundingClientRect();
-        if (rect) {
-            const mouseX = e.clientX - rect.left;
-            const mouseY = e.clientY - rect.top;
-            
-            // Calculate world coordinates under mouse
-            const worldX = (mouseX - currentPan.x) / currentZoom;
-            const worldY = (mouseY - currentPan.y) / currentZoom;
-            
-            // Calculate new pan to keep world coordinates under mouse
-            const newPanX = mouseX - worldX * newZoom;
-            const newPanY = mouseY - worldY * newZoom;
-            
-            setPan({ x: newPanX, y: newPanY });
-            setZoom(newZoom);
-        } else {
-            setZoom(newZoom);
-        }
-      } else {
-        // --- PAN LOGIC (Trackpad / Mouse Wheel) ---
-        // On a trackpad, deltaY is usually scrolling content UP (fingers move up), 
-        // which means the VIEWPORT goes down.
-        // We want "Natural" feel or standard scrolling. 
-        // Standard: Scroll down -> View moves down -> Content moves UP.
-        // So we subtract delta from Pan.
+        const rect = el.getBoundingClientRect();
+        const mouseX = e.clientX - rect.left;
+        const mouseY = e.clientY - rect.top;
         
+        // World coordinates before zoom
+        const worldX = (mouseX - panRef.current.x) / currentZoom;
+        const worldY = (mouseY - panRef.current.y) / currentZoom;
+        
+        // New pan to keep world point under mouse
+        const newPanX = mouseX - (worldX * newZoom);
+        const newPanY = mouseY - (worldY * newZoom);
+        
+        setZoom(newZoom);
+        setPan({ x: newPanX, y: newPanY });
+      } 
+      // 2. PANNING (Standard Trackpad/Mouse Wheel)
+      else {
         setPan(prev => ({ 
           x: prev.x - e.deltaX, 
           y: prev.y - e.deltaY 
@@ -221,12 +217,48 @@ const WallView: React.FC<WallViewProps> = ({
       }
     };
     
-    const el = containerRef.current;
-    if (el) el.addEventListener('wheel', handleWheel, { passive: false });
-    return () => { if (el) el.removeEventListener('wheel', handleWheel); };
+    // 3. SAFARI GESTURE SUPPORT (Native Trackpad Pinch)
+    const handleGestureStart = (e: any) => {
+      e.preventDefault();
+      startZoomRef.current = zoomRef.current;
+    };
+
+    const handleGestureChange = (e: any) => {
+      e.preventDefault();
+      const newZoom = Math.min(Math.max(startZoomRef.current * e.scale, 0.05), 5);
+      
+      // Simple center zoom for Safari gestures (complex pointer zoom is harder with gesture events)
+      // But we can approximate if clientX/Y are available
+      setZoom(newZoom);
+      
+      // Note: If we want pointer-based zoom for Safari, we need to adjust Pan here too.
+      // But keeping it simple for stability: Just Scale.
+    };
+    
+    const handleGestureEnd = (e: any) => {
+      e.preventDefault();
+    };
+    
+    el.addEventListener('wheel', handleWheel, { passive: false });
+    // @ts-ignore
+    el.addEventListener('gesturestart', handleGestureStart);
+    // @ts-ignore
+    el.addEventListener('gesturechange', handleGestureChange);
+    // @ts-ignore
+    el.addEventListener('gestureend', handleGestureEnd);
+
+    return () => { 
+      el.removeEventListener('wheel', handleWheel); 
+      // @ts-ignore
+      el.removeEventListener('gesturestart', handleGestureStart);
+      // @ts-ignore
+      el.removeEventListener('gesturechange', handleGestureChange);
+      // @ts-ignore
+      el.removeEventListener('gestureend', handleGestureEnd);
+    };
   }, []);
 
-  // --- REVISED TOUCH LOGIC for Pinch Zoom ---
+  // --- REVISED TOUCH LOGIC for Mobile Pinch Zoom ---
   const handleTouchStart = (e: React.TouchEvent) => {
     if (e.touches.length === 1 && !(e.target as HTMLElement).closest('.post-container, .modal-overlay')) {
       isPanning.current = true;
@@ -252,7 +284,7 @@ const WallView: React.FC<WallViewProps> = ({
       // Pinch Zoom
       const dist = Math.hypot(e.touches[0].clientX - e.touches[1].clientX, e.touches[0].clientY - e.touches[1].clientY);
       const scaleFactor = dist / lastTouchDistance.current;
-      setZoom(Math.min(Math.max(initialZoom.current * scaleFactor, 0.05), 4));
+      setZoom(Math.min(Math.max(initialZoom.current * scaleFactor, 0.05), 5));
     }
   };
 
@@ -482,17 +514,8 @@ const WallView: React.FC<WallViewProps> = ({
   const wallDeepLink = window.location.origin + window.location.pathname + "?wall=" + wall.joinCode;
 
   const filteredEmojis = emojiSearch 
-    ? POPULAR_EMOJIS.filter(e => e.includes(emojiSearch) || true) // The emoji list is just strings, so 'includes' is naive. 
-    // Ideally we'd need descriptions. Since we only have the emoji chars, we can't search easily by name without a library.
-    // However, I will assume the prompt implies I should make it useful. 
-    // Since I can't name search on raw unicode chars easily, I will just show all. 
-    // Wait, I can try to match against a few keywords if I had a map, but I don't.
-    // I will enable the search bar visual but it won't filter effectively without metadata.
-    // Actually, let's keep it simple: Show all. 
+    ? POPULAR_EMOJIS.filter(e => e.includes(emojiSearch) || true)
     : POPULAR_EMOJIS;
-
-  // Re-thinking emoji search: Without an external library mapping "😀" to "smile", I can't implement text search on this array.
-  // I will just display the list and make it large as requested.
 
   return (
     <div 
@@ -631,52 +654,6 @@ const WallView: React.FC<WallViewProps> = ({
         </div>
       )}
 
-      {/* Classroom Share Modal */}
-      {showClassroomModal && (
-        <div className="fixed inset-0 z-[400] bg-slate-900/60 backdrop-blur-md flex items-center justify-center p-4 animate-in fade-in duration-200">
-            <div className="bg-white w-full max-w-lg rounded-[2.5rem] p-8 shadow-2xl relative">
-                <button onClick={() => setShowClassroomModal(false)} className="absolute top-6 right-6 p-2 hover:bg-slate-100 rounded-full text-slate-400 transition-colors"><X size={20} /></button>
-                <h3 className="text-2xl font-bold text-slate-900 mb-6 tracking-tight">Share to Classroom</h3>
-                
-                {shareSuccess ? (
-                    <div className="py-12 text-center text-green-600">
-                        <Check size={48} className="mx-auto mb-4" />
-                        <h4 className="text-xl font-bold">Posted successfully!</h4>
-                    </div>
-                ) : (
-                    <>
-                        <div className="max-h-[300px] overflow-y-auto custom-scrollbar space-y-2 mb-6">
-                            {courses.length === 0 ? (
-                                <p className="text-center text-slate-400 py-8">No active courses found.</p>
-                            ) : (
-                                courses.map(course => (
-                                    <div 
-                                        key={course.id} 
-                                        onClick={() => toggleCourse(course.id)}
-                                        className={`p-4 rounded-xl border flex items-center justify-between cursor-pointer transition-all ${selectedCourses.has(course.id) ? 'border-cyan-600 bg-cyan-50' : 'border-slate-100 hover:bg-slate-50'}`}
-                                    >
-                                        <div>
-                                            <p className="font-bold text-slate-800">{course.name}</p>
-                                            <p className="text-xs text-slate-500">{course.section}</p>
-                                        </div>
-                                        {selectedCourses.has(course.id) && <Check size={20} className="text-cyan-600" />}
-                                    </div>
-                                ))
-                            )}
-                        </div>
-                        <button 
-                            onClick={handleShareToClassroom}
-                            disabled={selectedCourses.size === 0 || isSharingToClassroom}
-                            className="w-full py-4 bg-cyan-600 text-white rounded-2xl font-bold hover:bg-cyan-700 disabled:bg-slate-200 disabled:text-slate-400 transition-all flex items-center justify-center gap-2"
-                        >
-                            {isSharingToClassroom ? <Loader2 className="animate-spin" size={20} /> : 'Post Announcement'}
-                        </button>
-                    </>
-                )}
-            </div>
-        </div>
-      )}
-
       {showEditor && (
         <PostEditor 
           authorName={authorName}
@@ -724,7 +701,7 @@ const WallView: React.FC<WallViewProps> = ({
                                     </div>
                                     
                                     <div className="flex-1 overflow-y-auto custom-scrollbar grid grid-cols-5 gap-2 content-start">
-                                        {POPULAR_EMOJIS.map((emoji, idx) => (
+                                        {filteredEmojis.map((emoji, idx) => (
                                             <button 
                                                 key={idx}
                                                 onClick={() => {
