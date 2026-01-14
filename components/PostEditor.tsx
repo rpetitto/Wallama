@@ -164,7 +164,6 @@ const PostEditor: React.FC<PostEditorProps> = ({ onClose, onSubmit, authorName }
     const textToAnalyze = textToCheckParts.join(' ');
 
     // 2. Identify Image (if any)
-    // Only send Base64 image data (User uploads). Remote URLs (GIFs) are checked via text/metadata mostly.
     let imageToAnalyze = undefined;
     if (type === 'image' && url.startsWith('data:')) {
         imageToAnalyze = url;
@@ -190,9 +189,14 @@ const PostEditor: React.FC<PostEditorProps> = ({ onClose, onSubmit, authorName }
     });
   };
 
+  const isHexColor = selectedColor.startsWith('#');
+
   return (
     <div className="fixed inset-0 z-[100] flex items-center justify-center p-4 bg-slate-900/60 backdrop-blur-sm animate-in fade-in duration-300">
-      <div className={`w-full max-w-xl rounded-3xl shadow-2xl overflow-hidden flex flex-col max-h-[90vh] transition-colors duration-300 ${selectedColor === 'bg-white' ? 'bg-white' : selectedColor}`}>
+      <div 
+        className={`w-full max-w-xl rounded-3xl shadow-2xl overflow-hidden flex flex-col max-h-[90vh] transition-colors duration-300 ${!isHexColor && selectedColor === 'bg-white' ? 'bg-white' : (!isHexColor ? selectedColor : '')}`}
+        style={{ backgroundColor: isHexColor ? selectedColor : undefined }}
+      >
         <div className="p-6 border-b border-black/5 flex items-center justify-between bg-white/50 backdrop-blur-sm">
           <div>
             <h3 className="text-xl font-bold text-slate-800">Add to Wallama</h3>
@@ -370,7 +374,8 @@ const PostEditor: React.FC<PostEditorProps> = ({ onClose, onSubmit, authorName }
                   <button
                     key={color}
                     onClick={() => setSelectedColor(color)}
-                    className={`h-10 w-10 rounded-full border-2 transition-all ${color} ${selectedColor === color ? 'border-cyan-600 scale-110 shadow-md' : 'border-transparent hover:border-black/10 hover:scale-105'}`}
+                    style={{ backgroundColor: color }}
+                    className={`h-10 w-10 rounded-full border-2 transition-all ${selectedColor === color ? 'border-cyan-600 scale-110 shadow-md' : 'border-black/10 hover:scale-105'}`}
                     title={color}
                   />
                 ))}

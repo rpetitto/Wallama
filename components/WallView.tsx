@@ -3,7 +3,7 @@ import React, { useState, useEffect, useCallback, useRef } from 'react';
 import { Wall, Post as PostType, UserRole, ClassroomCourse } from '../types';
 import Post from './Post';
 import PostEditor from './PostEditor';
-import { ChevronLeft, Plus, Share2, Settings, X, Check, ZoomIn, ZoomOut, Maximize, Loader2, AlertCircle, LayoutGrid, Lock, Unlock, Image as ImageIcon } from 'lucide-react';
+import { ChevronLeft, Plus, Share2, Settings, X, Check, ZoomIn, ZoomOut, Maximize, Loader2, AlertCircle, LayoutGrid, Lock, Unlock, Image as ImageIcon, Copy } from 'lucide-react';
 import { WALL_GRADIENTS } from '../constants';
 import { databaseService } from '../services/databaseService';
 import { classroomService } from '../services/classroomService';
@@ -170,8 +170,10 @@ const WallView: React.FC<WallViewProps> = ({
 
   useEffect(() => {
     const handleWheel = (e: WheelEvent) => {
+      e.preventDefault(); // Prevent default browser zoom/scroll
+      
       if (e.ctrlKey || e.metaKey) {
-        e.preventDefault();
+        // Zoom
         const currentZoom = zoomRef.current;
         const currentPan = panRef.current;
         const zoomSensitivity = 0.005; 
@@ -191,6 +193,13 @@ const WallView: React.FC<WallViewProps> = ({
         } else {
             setZoom(newZoom);
         }
+      } else {
+        // Trackpad panning (two-finger scroll)
+        const currentPan = panRef.current;
+        setPan({ 
+          x: currentPan.x - e.deltaX, 
+          y: currentPan.y - e.deltaY 
+        });
       }
     };
     
@@ -204,7 +213,7 @@ const WallView: React.FC<WallViewProps> = ({
       isPanning.current = true;
       lastMousePos.current = { x: e.touches[0].clientX, y: e.touches[0].clientY };
     } else if (e.touches.length === 2) {
-      e.preventDefault();
+      e.preventDefault(); // Prevent default browser pinch zoom
       lastTouchDistance.current = Math.hypot(e.touches[0].clientX - e.touches[1].clientX, e.touches[0].clientY - e.touches[1].clientY);
       initialZoom.current = zoom;
     }
@@ -217,7 +226,7 @@ const WallView: React.FC<WallViewProps> = ({
       setPan(prev => ({ x: prev.x + dx, y: prev.y + dy }));
       lastMousePos.current = { x: e.touches[0].clientX, y: e.touches[0].clientY };
     } else if (e.touches.length === 2 && lastTouchDistance.current) {
-      e.preventDefault();
+      e.preventDefault(); // Prevent default browser pinch zoom
       const dist = Math.hypot(e.touches[0].clientX - e.touches[1].clientX, e.touches[0].clientY - e.touches[1].clientY);
       setZoom(Math.min(Math.max(initialZoom.current * (dist / lastTouchDistance.current), 0.05), 4));
     }
@@ -381,6 +390,12 @@ const WallView: React.FC<WallViewProps> = ({
     setShowSettings(false);
   };
 
+  const handleCopyLink = () => {
+    navigator.clipboard.writeText(window.location.href);
+    setShowCopyToast(true);
+    setTimeout(() => setShowCopyToast(false), 2000);
+  };
+
   if (error) {
     return (
       <div className="min-h-screen flex items-center justify-center bg-slate-50 p-6 text-center">
@@ -521,6 +536,16 @@ const WallView: React.FC<WallViewProps> = ({
                     </div>
                 </div>
 
+                <div className="flex gap-2">
+                    <button 
+                        onClick={handleCopyLink}
+                        className="flex-1 py-4 bg-white border border-slate-200 rounded-2xl shadow-sm hover:bg-slate-50 active:bg-slate-100 transition-all flex items-center justify-center gap-2 group"
+                    >
+                        <Copy size={18} className="text-slate-400 group-hover:text-cyan-600" />
+                        <span className="font-bold text-slate-700 group-hover:text-slate-900">Copy Link</span>
+                    </button>
+                </div>
+
                 {isTeacher && (
                     <button 
                         onClick={handleClassroomShareOpen}
@@ -603,13 +628,22 @@ const WallView: React.FC<WallViewProps> = ({
                 <h4 className="text-xs font-black text-slate-400 uppercase tracking-widest flex items-center gap-2"><ImageIcon size={14} /> Identity</h4>
                 <div className="grid grid-cols-[auto_1fr] gap-4">
                     <div className="space-y-2">
-                        <label className="text-xs font-bold text-slate-500 ml-1">Icon</label>
+                        <label className="text-xs font-bold text-slate-500 ml-1">Icon (Emoji)</label>
                         <div className="h-16 w-16 bg-slate-100 rounded-2xl flex items-center justify-center text-3xl border border-slate-200">
                              <input 
                                 type="text" 
-                                className="w-full h-full text-center bg-transparent outline-none cursor-pointer" 
+                                className="w-full h-full text-center bg-transparent outline-none cursor-pointer p-0 m-0"
+                                style={{ fontSize: '2rem' }} 
                                 value={settingsForm.icon || '📝'} 
-                                onChange={(e) => setSettingsForm({...settingsForm, icon: e.target.value.slice(0, 2)})}
+                                onChange={(e) => {
+                                  const val = e.target.value;
+                                  // Use Array.from to handle surrogate pairs (emojis) correctly
+                                  const chars = Array.from(val);
+                                  // Take the last entered character/emoji
+                                  const lastChar = chars[chars.length - 1];
+                                  setSettingsForm({...settingsForm, icon: lastChar || '📝'});
+                                }}
+                                onFocus={(e) => e.target.select()}
                              />
                         </div>
                     </div>

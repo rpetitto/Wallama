@@ -1,7 +1,7 @@
 
 import React, { useState, useRef } from 'react';
 import { Post as PostType } from '../types';
-import { Trash2, GripHorizontal, ExternalLink, Clock, User, PlayCircle, Quote } from 'lucide-react';
+import { Trash2, GripHorizontal, ExternalLink, Clock, User, Quote } from 'lucide-react';
 
 interface PostProps {
   post: PostType;
@@ -107,11 +107,22 @@ const Post: React.FC<PostProps> = ({ post, onDelete, onMove, onMoveEnd, isOwner,
   };
 
   const displayName = isWallAnonymous ? 'Anonymous' : post.authorName;
+  
+  // Handle both legacy classes (bg-white) and new hex codes
+  const isHexColor = post.color?.startsWith('#');
+  const containerStyle: React.CSSProperties = {
+    left: post.x,
+    top: post.y,
+    zIndex: isDragging ? 9999 : post.zIndex,
+    backgroundColor: isHexColor ? post.color : undefined
+  };
+  
+  const containerClass = `post-container absolute p-4 w-[300px] rounded-2xl shadow-lg border border-black/5 transition-all duration-75 ${!isHexColor ? post.color : ''} group select-none ${isDragging ? 'shadow-2xl z-[9999] scale-[1.02] cursor-grabbing' : isOwner ? 'cursor-grab' : 'cursor-default'} hover:shadow-2xl`;
 
   return (
     <div 
-      className={`post-container absolute p-4 w-[300px] rounded-2xl shadow-lg border border-black/5 transition-all duration-75 ${post.color} group select-none ${isDragging ? 'shadow-2xl z-[9999] scale-[1.02] cursor-grabbing' : isOwner ? 'cursor-grab' : 'cursor-default'} hover:shadow-2xl`}
-      style={{ left: post.x, top: post.y, zIndex: isDragging ? 9999 : post.zIndex }}
+      className={containerClass}
+      style={containerStyle}
       onMouseEnter={() => setIsHovered(true)}
       onMouseLeave={() => setIsHovered(false)}
       onMouseDown={handleMouseDown}

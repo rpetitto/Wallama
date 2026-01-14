@@ -1,12 +1,12 @@
 
 export const WALL_COLORS = [
-  'bg-white',
-  'bg-cyan-50',
-  'bg-sky-100',
-  'bg-teal-50',
-  'bg-blue-50',
-  'bg-indigo-50',
-  'bg-slate-50'
+  '#99ffff',
+  '#99ccff',
+  '#ccccff',
+  '#669999',
+  '#006699',
+  '#0099cc',
+  '#666666'
 ];
 
 export const WALL_GRADIENTS = [
