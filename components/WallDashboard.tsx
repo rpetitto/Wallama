@@ -1,7 +1,7 @@
 
-import React, { useState } from 'react';
+import React, { useState, useRef, useEffect } from 'react';
 import { User, Wall, WallType } from '../types';
-import { Plus, LogOut, ArrowRight, Layout, Users, Calendar, X, Loader2, BookOpen, Layers, Grip, List, ChevronRight, Check, History } from 'lucide-react';
+import { Plus, LogOut, ArrowRight, Layout, Users, Calendar, X, Loader2, BookOpen, Layers, Grip, List, ChevronRight, Check, History, MoreVertical, Share2, Lock, Unlock, Trash2, Copy, ShieldAlert } from 'lucide-react';
 import { LlamaLogo } from './LlamaLogo';
 
 interface WallDashboardProps {
@@ -10,12 +10,14 @@ interface WallDashboardProps {
   onCreateWall: (name: string, desc: string, type: WallType) => void;
   onJoinWall: (code: string) => void;
   onSelectWall: (id: string) => void;
+  onUpdateWall: (wallId: string, updates: Partial<Wall>) => void;
+  onDeleteWall: (wallId: string) => void;
   onLogout: () => void;
   isSyncing?: boolean;
 }
 
 const WallDashboard: React.FC<WallDashboardProps> = ({ 
-  user, walls, onCreateWall, onJoinWall, onSelectWall, onLogout, isSyncing 
+  user, walls, onCreateWall, onJoinWall, onSelectWall, onUpdateWall, onDeleteWall, onLogout, isSyncing 
 }) => {
   const [showCreateModal, setShowCreateModal] = useState(false);
   const [createStep, setCreateStep] = useState<1 | 2>(1);
@@ -23,6 +25,23 @@ const WallDashboard: React.FC<WallDashboardProps> = ({
   const [newWallDesc, setNewWallDesc] = useState('');
   const [newWallType, setNewWallType] = useState<WallType>('freeform');
   const [joinCode, setJoinCode] = useState('');
+  
+  const [openMenuId, setOpenMenuId] = useState<string | null>(null);
+  const [shareWall, setShareWall] = useState<Wall | null>(null);
+  const [deleteWallConfirm, setDeleteWallConfirm] = useState<Wall | null>(null);
+  const [showCopyToast, setShowCopyToast] = useState(false);
+
+  const menuRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    const handleClickOutside = (event: MouseEvent) => {
+      if (menuRef.current && !menuRef.current.contains(event.target as Node)) {
+        setOpenMenuId(null);
+      }
+    };
+    document.addEventListener("mousedown", handleClickOutside);
+    return () => document.removeEventListener("mousedown", handleClickOutside);
+  }, []);
 
   const isTeacher = user.role === 'teacher';
   const sectionTitle = isTeacher ? 'My Created Walls' : 'My Joined Walls';
@@ -44,6 +63,18 @@ const WallDashboard: React.FC<WallDashboardProps> = ({
     setCreateStep(1);
     setNewWallName('');
     setNewWallDesc('');
+  };
+
+  const handleCopyLink = (wall: Wall) => {
+    const link = window.location.origin + window.location.pathname + "?wall=" + wall.joinCode;
+    navigator.clipboard.writeText(link);
+    setShowCopyToast(true);
+    setTimeout(() => setShowCopyToast(false), 2000);
+  };
+
+  const toggleFreeze = (wall: Wall) => {
+    onUpdateWall(wall.id, { isFrozen: !wall.isFrozen });
+    setOpenMenuId(null);
   };
 
   return (
@@ -136,25 +167,63 @@ const WallDashboard: React.FC<WallDashboardProps> = ({
                 ? { backgroundImage: `url(${wall.background})`, backgroundSize: 'cover', backgroundPosition: 'center' }
                 : {};
               const wallBgClass = !isUrlBg ? `bg-gradient-to-br ${wall.background}` : '';
+              const isOwner = isTeacher && wall.teacherId === user.id;
 
               return (
                 <div 
                   key={wall.id} 
+                  className="group bg-white rounded-3xl overflow-hidden shadow-sm border border-slate-100 hover:shadow-xl hover:-translate-y-1 transition-all cursor-pointer relative"
                   onClick={() => onSelectWall(wall.id)}
-                  className="group bg-white rounded-3xl overflow-hidden shadow-sm border border-slate-100 hover:shadow-xl hover:-translate-y-1 transition-all cursor-pointer"
                 >
                   <div 
                     className={`h-32 p-6 flex flex-col justify-between relative ${wallBgClass}`}
                     style={wallBgStyle}
                   >
-                    {/* Overlay for better readability on image backgrounds */}
                     {isUrlBg && <div className="absolute inset-0 bg-black/10 group-hover:bg-black/20 transition-colors" />}
                     
                     <div className="relative z-10 flex justify-between items-start">
                       <span className="bg-white/20 backdrop-blur-md px-3 py-1 rounded-full text-[10px] font-bold text-white uppercase tracking-wider border border-white/20">
-                        {wall.posts.length} Posts
+                        {wall.posts.length} {wall.posts.length === 1 ? 'Post' : 'Posts'}
                       </span>
-                      <span className="text-white font-mono text-sm font-bold tracking-widest drop-shadow-md">{wall.joinCode}</span>
+                      <div className="flex items-center gap-1">
+                        <span className="text-white font-mono text-sm font-bold tracking-widest drop-shadow-md">{wall.joinCode}</span>
+                        <div className="relative" ref={openMenuId === wall.id ? menuRef : null}>
+                            <button 
+                                onClick={(e) => { e.stopPropagation(); setOpenMenuId(openMenuId === wall.id ? null : wall.id); }}
+                                className="p-1 text-white hover:bg-white/20 rounded-lg transition-all active:scale-90"
+                            >
+                                <MoreVertical size={18} />
+                            </button>
+                            {openMenuId === wall.id && (
+                                <div className="absolute right-0 top-full mt-1 w-44 bg-white rounded-xl shadow-2xl border border-slate-100 py-1.5 z-[100] animate-in fade-in zoom-in-95 duration-200">
+                                    <button 
+                                        onClick={(e) => { e.stopPropagation(); setShareWall(wall); setOpenMenuId(null); }}
+                                        className="w-full px-4 py-2.5 text-left text-xs font-bold text-slate-700 hover:bg-slate-50 flex items-center gap-3 transition-colors"
+                                    >
+                                        <Share2 size={14} className="text-cyan-600" /> Share Wall
+                                    </button>
+                                    {isOwner && (
+                                        <>
+                                            <button 
+                                                onClick={(e) => { e.stopPropagation(); toggleFreeze(wall); }}
+                                                className="w-full px-4 py-2.5 text-left text-xs font-bold text-slate-700 hover:bg-slate-50 flex items-center gap-3 transition-colors"
+                                            >
+                                                {wall.isFrozen ? <Unlock size={14} className="text-indigo-600" /> : <Lock size={14} className="text-indigo-600" />}
+                                                {wall.isFrozen ? 'Unfreeze Wall' : 'Freeze Wall'}
+                                            </button>
+                                            <div className="my-1 border-t border-slate-50" />
+                                            <button 
+                                                onClick={(e) => { e.stopPropagation(); setDeleteWallConfirm(wall); setOpenMenuId(null); }}
+                                                className="w-full px-4 py-2.5 text-left text-xs font-bold text-red-600 hover:bg-red-50 flex items-center gap-3 transition-colors"
+                                            >
+                                                <Trash2 size={14} /> Delete Wall
+                                            </button>
+                                        </>
+                                    )}
+                                </div>
+                            )}
+                        </div>
+                      </div>
                     </div>
                     <div className="relative z-10 flex items-center gap-3">
                       <span className="text-2xl bg-white/30 backdrop-blur-md rounded-lg h-10 w-10 flex items-center justify-center shadow-sm border border-white/10">{wall.icon || '📝'}</span>
@@ -170,6 +239,7 @@ const WallDashboard: React.FC<WallDashboardProps> = ({
                         {wall.type === 'timeline' && <History size={10} />}
                         {wall.type}
                       </span>
+                      {wall.isFrozen && <span className="text-[10px] font-black text-indigo-600 uppercase tracking-widest bg-indigo-50 px-2 py-0.5 rounded-md border border-indigo-100 flex items-center gap-1"><Lock size={10} /> Frozen</span>}
                     </div>
                     <p className="text-sm text-slate-500 line-clamp-2 mb-4 h-10 font-medium leading-relaxed">{wall.description}</p>
                     <div className="flex items-center justify-between text-[10px] font-bold text-slate-400 uppercase tracking-widest pt-4 border-t border-slate-50">
@@ -193,6 +263,39 @@ const WallDashboard: React.FC<WallDashboardProps> = ({
         </div>
         )}
       </main>
+
+      {/* Shared Modals */}
+      {shareWall && (
+        <div className="fixed inset-0 z-[300] bg-slate-900/60 backdrop-blur-md flex items-center justify-center p-4" onClick={() => setShareWall(null)}>
+            <div className="bg-white rounded-[2.5rem] shadow-2xl p-8 max-w-sm w-full text-center space-y-6 relative animate-in zoom-in-95" onClick={e => e.stopPropagation()}>
+                <button onClick={() => setShareWall(null)} className="absolute top-6 right-6 p-2 text-slate-400 hover:text-slate-600"><X size={24} /></button>
+                <h3 className="text-2xl font-black text-slate-800">Join this Wall</h3>
+                <div className="bg-white p-4 rounded-3xl border-2 border-cyan-100 inline-block shadow-sm">
+                    <img src={`https://api.qrserver.com/v1/create-qr-code/?size=250x250&data=${encodeURIComponent(window.location.origin + window.location.pathname + "?wall=" + shareWall.joinCode)}&color=0891b2&bgcolor=ffffff`} alt="QR" className="w-48 h-48 rounded-xl object-contain"/>
+                </div>
+                <p className="text-4xl font-black text-cyan-600 tracking-tighter">{shareWall.joinCode}</p>
+                <button onClick={() => handleCopyLink(shareWall)} className="w-full py-4 bg-white border border-slate-100 rounded-2xl flex items-center justify-center gap-2 font-bold text-slate-700 hover:bg-slate-50 transition-colors shadow-sm">
+                    <Copy size={18} /> Copy Link
+                </button>
+            </div>
+        </div>
+      )}
+
+      {deleteWallConfirm && (
+          <div className="fixed inset-0 z-[500] bg-slate-900/60 backdrop-blur-md flex items-center justify-center p-4" onClick={() => setDeleteWallConfirm(null)}>
+              <div className="bg-white rounded-[2rem] p-8 max-w-sm w-full text-center space-y-6 animate-in zoom-in-95" onClick={e => e.stopPropagation()}>
+                  <div className="h-16 w-16 bg-red-100 rounded-full flex items-center justify-center mx-auto text-red-600"><ShieldAlert size={32} /></div>
+                  <h3 className="text-xl font-black text-slate-800">Delete Wall?</h3>
+                  <p className="text-sm text-slate-500 font-medium leading-relaxed">This action cannot be undone. All posts in "{deleteWallConfirm.name}" will be lost forever.</p>
+                  <div className="flex gap-4">
+                    <button onClick={() => setDeleteWallConfirm(null)} className="flex-1 py-3 font-bold bg-slate-100 rounded-xl text-slate-600">No</button>
+                    <button onClick={() => { onDeleteWall(deleteWallConfirm.id); setDeleteWallConfirm(null); }} className="flex-1 py-3 font-black text-white bg-red-600 rounded-xl shadow-lg">Delete</button>
+                  </div>
+              </div>
+          </div>
+      )}
+
+      {showCopyToast && <div className="fixed top-24 left-1/2 -translate-x-1/2 z-[300] bg-slate-900/90 text-white px-6 py-3 rounded-full shadow-2xl flex items-center gap-3 backdrop-blur-md border border-white/10 animate-in slide-in-from-top-4"><Check size={18} className="text-green-400" /> Link copied!</div>}
 
       {showCreateModal && (
         <div className="fixed inset-0 z-[60] flex items-center justify-center p-4 bg-slate-900/60 backdrop-blur-sm animate-in fade-in duration-300">

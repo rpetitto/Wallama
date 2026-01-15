@@ -36,7 +36,8 @@ const PostEditor: React.FC<PostEditorProps> = ({ onClose, onSubmit, authorName, 
   const [isCheckingSafety, setIsCheckingSafety] = useState(false);
   const [safetyError, setSafetyError] = useState<string | null>(null);
   
-  const [imagePickerTab, setImagePickerTab] = useState<'presets' | 'upload' | 'drive' | 'url' | 'search'>('presets');
+  // Defaulting to 'upload' and removed 'presets' from types for posts
+  const [imagePickerTab, setImagePickerTab] = useState<'upload' | 'drive' | 'url' | 'search'>('upload');
   const [imageSearch, setImageSearch] = useState('');
   const [imageUrlInput, setImageUrlInput] = useState('');
   const [isImageSearching, setIsImageSearching] = useState(false);
@@ -256,7 +257,7 @@ const PostEditor: React.FC<PostEditorProps> = ({ onClose, onSubmit, authorName, 
     <div className="space-y-4">
       <div className="flex gap-2 p-1 bg-black/5 rounded-xl overflow-x-auto">
         {[
-          { id: 'presets', icon: LayoutGrid, label: 'Presets' },
+          // Presets removed for posts
           { id: 'upload', icon: Upload, label: 'Upload' },
           { id: 'drive', icon: HardDrive, label: 'Drive' },
           { id: 'url', icon: LinkIconSmall, label: 'URL' },
@@ -268,13 +269,6 @@ const PostEditor: React.FC<PostEditorProps> = ({ onClose, onSubmit, authorName, 
         ))}
       </div>
       <div className="min-h-[140px] p-4 bg-black/5 rounded-2xl border border-black/5">
-        {imagePickerTab === 'presets' && (
-          <div className="grid grid-cols-4 gap-2">
-            {WALL_GRADIENTS.map(g => (
-              <button key={g} onClick={() => { if(type==='title') setHeaderImage(g); else setUrl(g); }} className={`h-12 rounded-lg bg-gradient-to-br ${g}`} />
-            ))}
-          </div>
-        )}
         {imagePickerTab === 'upload' && (
           <div className="flex flex-col items-center justify-center py-4 cursor-pointer" onClick={() => fileInputRef.current?.click()}>
             <Upload className="text-slate-400 mb-2" size={32} />

@@ -154,6 +154,22 @@ const App: React.FC = () => {
     await databaseService.updateWall(activeWallId, wallUpdate);
   };
 
+  const handleUpdateWallOnDashboard = async (wallId: string, updates: Partial<Wall>) => {
+    if (user?.isGuest) return;
+    const success = await databaseService.updateWall(wallId, updates);
+    if (success) {
+      setMyWalls(prev => prev.map(w => w.id === wallId ? { ...w, ...updates } : w));
+    }
+  };
+
+  const handleDeleteWallOnDashboard = async (wallId: string) => {
+    if (user?.isGuest) return;
+    const success = await databaseService.deleteWall(wallId);
+    if (success) {
+      setMyWalls(prev => prev.filter(w => w.id !== wallId));
+    }
+  };
+
   const handleAddPost = async (postData: Partial<Post>) => {
     if (!user || !activeWallId) return null;
     const newPost: Partial<Post> = {
@@ -229,6 +245,8 @@ const App: React.FC = () => {
       onCreateWall={handleCreateWall}
       onJoinWall={handleQuickJoin}
       onSelectWall={setActiveWallId}
+      onUpdateWall={handleUpdateWallOnDashboard}
+      onDeleteWall={handleDeleteWallOnDashboard}
       onLogout={handleLogout}
       isSyncing={isSyncing}
     />
