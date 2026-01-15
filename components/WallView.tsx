@@ -3,7 +3,7 @@ import React, { useState, useEffect, useCallback, useRef } from 'react';
 import { Wall, Post as PostType, UserRole, ClassroomCourse, WallType } from '../types';
 import Post from './Post';
 import PostEditor from './PostEditor';
-import { ChevronLeft, Plus, Share2, Settings, X, Check, ZoomIn, ZoomOut, Maximize, Loader2, AlertCircle, LayoutGrid, Lock, Unlock, Image as ImageIcon, Copy, Search, School, Trash2, ShieldAlert, Upload, HardDrive, Link as LinkIcon, Sparkles, Grip, Layers, List, History } from 'lucide-react';
+import { ChevronLeft, Plus, Share2, Settings, X, Check, ZoomIn, ZoomOut, Maximize, Loader2, AlertCircle, LayoutGrid, Lock, Unlock, Image as ImageIcon, Copy, Search, School, Trash2, ShieldAlert, Upload, HardDrive, Link as LinkIcon, Sparkles, Grip, Layers, List, History, Kanban } from 'lucide-react';
 import { WALL_GRADIENTS, POPULAR_EMOJIS } from '../constants';
 import { databaseService } from '../services/databaseService';
 import { classroomService } from '../services/classroomService';
@@ -14,6 +14,8 @@ const GOOGLE_CLIENT_ID = "6888240288-5v0p6nsoi64q1puv1vpvk1njd398ra8b.apps.googl
 
 const TIMELINE_AXIS_Y = 450; 
 const MIN_MILESTONE_SPACING = 340; // 300px card + 40px gap
+const KANBAN_COLUMN_WIDTH = 340;
+const KANBAN_START_X = 50;
 
 interface WallViewProps {
   wallId: string;
@@ -76,7 +78,7 @@ const WallView: React.FC<WallViewProps> = ({
   const optimisticTimers = useRef<Map<string, ReturnType<typeof setTimeout>>>(new Map());
   const lastInteractionTime = useRef<number>(0);
 
-  const isCanvasMode = wall?.type === 'freeform' || wall?.type === 'timeline';
+  const isCanvasMode = wall?.type === 'freeform' || wall?.type === 'timeline' || wall?.type === 'kanban';
   const isInteractionBlocked = showEditor || showSettings || showShareOverlay || showClassroomModal || showDeleteConfirm;
 
   useEffect(() => {
@@ -145,6 +147,12 @@ const WallView: React.FC<WallViewProps> = ({
               if (a.parentId && b.parentId && a.parentId === b.parentId) return a.createdAt - b.createdAt;
               if (!a.parentId && !b.parentId) return a.x - b.x;
               return a.createdAt - b.createdAt;
+           });
+        } else if (currentType === 'kanban') {
+           combinedPosts.sort((a, b) => {
+               if (!a.parentId && !b.parentId) return a.x - b.x; // Sort columns by X
+               if (a.parentId && b.parentId && a.parentId === b.parentId) return a.y - b.y; // Sort items by Y
+               return 0;
            });
         } else if (currentType === 'freeform') {
            combinedPosts.sort((a, b) => a.zIndex - b.zIndex);
@@ -271,6 +279,11 @@ const WallView: React.FC<WallViewProps> = ({
        const slotCount = milestones.length;
        return { x: slotCount * MIN_MILESTONE_SPACING, y: TIMELINE_AXIS_Y };
     }
+    if ((wall?.type as string) === 'kanban') {
+       const columns = posts.filter(p => !p.parentId);
+       const slotCount = columns.length;
+       return { x: KANBAN_START_X + (slotCount * KANBAN_COLUMN_WIDTH), y: 50 };
+    }
     if (posts.length === 0) return { x: 100, y: 100 };
     const maxX = Math.max(...posts.map(p => p.x + 300));
     return { x: maxX + 50, y: 100 };
@@ -287,34 +300,32 @@ const WallView: React.FC<WallViewProps> = ({
       if (!targetPost) return prev;
 
       if ((prev.type as string) === 'timeline' && !targetPost.parentId) {
-        // Handle milestone visual shuffling
+        // Timeline shuffling logic...
         const proposedIdx = Math.max(0, Math.round(x / MIN_MILESTONE_SPACING));
         const others = updatedPosts.filter(p => !p.parentId && p.id !== id).sort((a, b) => a.x - b.x);
-        
         const reordered = [...others];
         reordered.splice(proposedIdx, 0, { ...targetPost, x }); 
-
         const finalMilestones = reordered.map((m, idx) => {
             const discreteX = idx * MIN_MILESTONE_SPACING;
-            if (m.id === id) return { ...m, x }; // Fluid dragging
-            
+            if (m.id === id) return { ...m, x }; 
             const updatedOther = { ...m, x: discreteX, y: TIMELINE_AXIS_Y };
             optimisticPosts.current.set(updatedOther.id, updatedOther);
             scheduleOptimisticCleanup(updatedOther.id);
             return updatedOther;
         });
-
         updatedPosts = updatedPosts.map(p => {
            const fm = finalMilestones.find(m => m.id === p.id);
            return fm ? fm : p;
         });
-
+      } else if ((prev.type as string) === 'kanban') {
+          updatedPosts = updatedPosts.map(p => p.id === id ? { ...p, x, y } : p);
+          optimisticPosts.current.set(id, { ...targetPost, x, y });
       } else {
         const finalY = ((prev.type as string) === 'timeline' && !targetPost.parentId) ? TIMELINE_AXIS_Y : y;
         updatedPosts = updatedPosts.map(p => p.id === id ? { ...p, x, y: finalY } : p);
         optimisticPosts.current.set(id, { ...targetPost, x, y: finalY });
-        scheduleOptimisticCleanup(id);
       }
+      scheduleOptimisticCleanup(id);
 
       return { ...prev, posts: updatedPosts };
     });
@@ -327,18 +338,77 @@ const WallView: React.FC<WallViewProps> = ({
     if ((wall?.type as string) === 'timeline') {
        const finalSlotIdx = Math.max(0, Math.round(x / MIN_MILESTONE_SPACING));
        const finalX = finalSlotIdx * MIN_MILESTONE_SPACING;
-       
        setWall(prev => {
           if (!prev) return prev;
           return { ...prev, posts: prev.posts.map(p => p.id === id ? { ...p, x: finalX } : p) };
        });
-
        const milestones = wall.posts.filter(p => !p.parentId);
        const promises = milestones.map(m => {
           const mX = m.id === id ? finalX : m.x;
           return onMovePost(m.id, mX, TIMELINE_AXIS_Y);
        });
        await Promise.all(promises);
+
+    } else if ((wall?.type as string) === 'kanban') {
+       const movedPost = wall.posts.find(p => p.id === id);
+       if (!movedPost) return;
+
+       if (!movedPost.parentId) {
+           // Move Column
+           const colWidth = KANBAN_COLUMN_WIDTH;
+           const proposedIdx = Math.max(0, Math.round((x - KANBAN_START_X) / colWidth));
+           const columns = wall.posts.filter(p => !p.parentId && p.id !== id).sort((a, b) => a.x - b.x);
+           columns.splice(proposedIdx, 0, movedPost);
+           
+           const updates = columns.map((col, idx) => ({ 
+               id: col.id, 
+               x: KANBAN_START_X + (idx * colWidth),
+               y: 50 // Fixed Y for columns
+           }));
+
+           setWall(prev => prev ? ({ ...prev, posts: prev.posts.map(p => {
+               const update = updates.find(u => u.id === p.id);
+               return update ? { ...p, x: update.x, y: update.y } : p;
+           })}) : null);
+
+           await Promise.all(updates.map(u => onMovePost(u.id, u.x, u.y)));
+       } else {
+           // Move Card
+           const columns = wall.posts.filter(p => !p.parentId).sort((a, b) => a.x - b.x);
+           let targetColumn = columns[0];
+           
+           // Find column based on X
+           for (const col of columns) {
+               if (x > col.x && x < col.x + KANBAN_COLUMN_WIDTH) {
+                   targetColumn = col;
+                   break;
+               }
+           }
+           // Edge case: if dragged past the last column
+           if (x > columns[columns.length-1].x + KANBAN_COLUMN_WIDTH) targetColumn = columns[columns.length-1];
+
+           if (targetColumn) {
+               const newParentId = targetColumn.id;
+               
+               if (newParentId !== movedPost.parentId) {
+                   await onEditPost(id, { parentId: newParentId });
+               }
+
+               // The y coming from dragEnd is relative to the column top if we used proper drag logic in Post.tsx,
+               // or it's the absolute position relative to original offset.
+               // Given Post.tsx changes: y is now effectively the `offsetTop` relative to the column.
+               // So saving `y` is correct for vertical sorting.
+               await onMovePost(id, 0, y); 
+               
+               setWall(prev => {
+                   if (!prev) return prev;
+                   return {
+                       ...prev,
+                       posts: prev.posts.map(p => p.id === id ? { ...p, parentId: newParentId, y } : p)
+                   };
+               });
+           }
+       }
     } else {
        await onMovePost(id, x, y);
     }
@@ -464,8 +534,16 @@ const WallView: React.FC<WallViewProps> = ({
 
   const isImageBackground = (settingsForm.background?.startsWith('http') || settingsForm.background?.startsWith('data:image')) && !WALL_GRADIENTS.includes(settingsForm.background!);
 
-  const milestones = wall.posts.filter(p => !p.parentId);
-  const getAttachments = (parentId: string) => wall.posts.filter(p => p.parentId === parentId);
+  const milestones = wall.type === 'timeline' ? wall.posts.filter(p => !p.parentId) : [];
+  const kanbanColumns = wall.type === 'kanban' ? wall.posts.filter(p => !p.parentId).sort((a, b) => a.x - b.x) : [];
+  
+  const getAttachments = (parentId: string) => {
+      const children = wall.posts.filter(p => p.parentId === parentId);
+      if (wall.type === 'kanban') {
+          return children.sort((a, b) => a.y - b.y);
+      }
+      return children;
+  };
 
   return (
     <div 
@@ -491,6 +569,7 @@ const WallView: React.FC<WallViewProps> = ({
                         {wall.type === 'wall' && <Layers size={8} />}
                         {wall.type === 'stream' && <List size={8} />}
                         {wall.type === 'timeline' && <History size={8} />}
+                        {wall.type === 'kanban' && <Kanban size={8} />}
                         {wall.type}
                       </span>
                     </div>
@@ -513,7 +592,6 @@ const WallView: React.FC<WallViewProps> = ({
            >
              <div className="relative w-[10000px] h-[10000px]">
                {wall.type === 'timeline' && (
-                  /* Axis line now perfectly synchronized with TIMELINE_AXIS_Y */
                   <div className={`absolute left-[-30000px] w-[60000px] h-1 bg-white/60 shadow-md z-0 pointer-events-none`} style={{ top: `${TIMELINE_AXIS_Y}px` }} />
                )}
 
@@ -541,6 +619,31 @@ const WallView: React.FC<WallViewProps> = ({
                       ))}
                     </Post>
                   ))
+               ) : wall.type === 'kanban' ? (
+                   kanbanColumns.map(column => (
+                        <Post
+                            key={column.id} post={column} zoom={zoom}
+                            onDelete={(id) => { setWall(prev => prev ? ({ ...prev, posts: prev.posts.filter(p => p.id !== id) }) : null); onDeletePost(id); }}
+                            onEdit={handleEditClick} onMove={handlePostMove} onMoveEnd={handlePostMoveEnd}
+                            onAddDetail={handleAddDetail}
+                            isOwner={isTeacher} // Only teachers move/edit columns
+                            snapToGrid={false} isWallAnonymous={wall.isAnonymous} isWallFrozen={wall.isFrozen}
+                            isKanbanColumn={true}
+                        >
+                            {getAttachments(column.id).map(card => (
+                                <div key={card.id} className="w-full relative">
+                                    <Post
+                                        post={{...card, x: 0, y: 0}} zoom={zoom} // Pos controlled by parent render logic but maintained for visual consistency
+                                        onDelete={(id) => { setWall(prev => prev ? ({ ...prev, posts: prev.posts.filter(p => p.id !== id) }) : null); onDeletePost(id); }}
+                                        onEdit={handleEditClick} onMove={handlePostMove} onMoveEnd={handlePostMoveEnd}
+                                        isOwner={card.authorId === currentUserId || isTeacher}
+                                        snapToGrid={false} isWallAnonymous={wall.isAnonymous} isWallFrozen={wall.isFrozen}
+                                        isKanbanCard={true}
+                                    />
+                                </div>
+                            ))}
+                        </Post>
+                   ))
                ) : (
                   wall.posts.map(post => (
                     <Post 
@@ -742,36 +845,16 @@ const WallView: React.FC<WallViewProps> = ({
         </div>
       )}
 
-      {showDeleteConfirm && (
-          <div className="fixed inset-0 z-[500] bg-slate-900/60 backdrop-blur-md flex items-center justify-center p-4" onClick={() => setShowDeleteConfirm(false)}>
-              <div className="bg-white rounded-[2rem] p-8 max-sm w-full text-center space-y-6 animate-in zoom-in-95" onClick={e => e.stopPropagation()}>
-                  <div className="h-16 w-16 bg-red-100 rounded-full flex items-center justify-center mx-auto text-red-600"><ShieldAlert size={32} /></div>
-                  <h3 className="text-xl font-black text-slate-800">Delete Wall?</h3>
-                  <p className="text-sm text-slate-500 font-medium leading-relaxed">This action cannot be undone. All posts will be lost forever.</p>
-                  <div className="flex gap-4">
-                    <button onClick={() => setShowDeleteConfirm(false)} className="flex-1 py-3 font-bold bg-slate-100 rounded-xl text-slate-600">No</button>
-                    <button onClick={handleDeleteWall} className="flex-1 py-3 font-black text-white bg-red-600 rounded-xl">Delete</button>
-                  </div>
-              </div>
-          </div>
+      {showEditor && (
+        <PostEditor 
+            authorName={authorName} 
+            initialPost={editingPostId ? wall.posts.find(p => p.id === editingPostId) : undefined} 
+            parentId={activeParentId || undefined} 
+            onClose={() => { setShowEditor(false); setEditingPostId(null); setActiveParentId(null); }} 
+            onSubmit={handlePostSubmit}
+            isKanbanColumn={wall.type === 'kanban' && !activeParentId && !editingPostId} // Only when creating a new column via main + button
+        />
       )}
-
-      {showShareOverlay && (
-        <div className="fixed inset-0 z-[300] bg-slate-900/60 backdrop-blur-md flex items-center justify-center p-4 modal-overlay" onClick={() => setShowShareOverlay(false)}>
-            <div className="bg-white rounded-[2.5rem] shadow-2xl p-8 max-sm w-full text-center space-y-6 relative" onClick={e => e.stopPropagation()}>
-                <button onClick={() => setShowShareOverlay(false)} className="absolute top-6 right-6 p-2 text-slate-400 hover:text-slate-600"><X size={24} /></button>
-                <h3 className="text-2xl font-black text-slate-800">Join this Wall</h3>
-                <div className="bg-white p-4 rounded-3xl border-2 border-cyan-100 inline-block shadow-sm">
-                    <img src={`https://api.qrserver.com/v1/create-qr-code/?size=250x250&data=${encodeURIComponent(wallDeepLink)}&color=0891b2&bgcolor=ffffff`} alt="QR" className="w-48 h-48 rounded-xl object-contain"/>
-                </div>
-                <p className="text-4xl font-black text-cyan-600 tracking-tighter">{wall.joinCode}</p>
-                <div className="flex gap-2"><button onClick={handleCopyLink} className="flex-1 py-4 bg-white border border-slate-100 rounded-2xl flex items-center justify-center gap-2 font-bold text-slate-700 hover:bg-slate-50 transition-colors shadow-sm"><Copy size={18} /> Copy Link</button></div>
-                {isTeacher && <button onClick={handleClassroomShareOpen} className="w-full py-4 bg-white border border-slate-100 rounded-2xl flex items-center justify-center gap-3 font-bold text-slate-700 hover:bg-slate-50 transition-colors shadow-sm"><img src="https://www.gstatic.com/classroom/logo_square_48.svg" className="w-5 h-5" alt="" /> Share to Classroom</button>}
-            </div>
-        </div>
-      )}
-
-      {showEditor && <PostEditor authorName={authorName} initialPost={editingPostId ? wall.posts.find(p => p.id === editingPostId) : undefined} parentId={activeParentId || undefined} onClose={() => { setShowEditor(false); setEditingPostId(null); setActiveParentId(null); }} onSubmit={handlePostSubmit} />}
 
       {showClassroomModal && (
         <div className="fixed inset-0 z-[400] bg-slate-900/60 backdrop-blur-sm flex items-center justify-center p-4" onClick={() => setShowClassroomModal(false)}>

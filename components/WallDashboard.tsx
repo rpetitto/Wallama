@@ -1,7 +1,7 @@
 
 import React, { useState, useRef, useEffect } from 'react';
 import { User, Wall, WallType } from '../types';
-import { Plus, LogOut, ArrowRight, Layout, Users, Calendar, X, Loader2, BookOpen, Layers, Grip, List, ChevronRight, Check, History, MoreVertical, Share2, Lock, Unlock, Trash2, Copy, ShieldAlert } from 'lucide-react';
+import { Plus, LogOut, ArrowRight, Layout, Users, Calendar, X, Loader2, BookOpen, Layers, Grip, List, ChevronRight, Check, History, MoreVertical, Share2, Lock, Unlock, Trash2, Copy, ShieldAlert, Kanban } from 'lucide-react';
 import { LlamaLogo } from './LlamaLogo';
 
 interface WallDashboardProps {
@@ -50,7 +50,8 @@ const WallDashboard: React.FC<WallDashboardProps> = ({
     { id: 'freeform', label: 'Freeform', desc: 'Drag and drop posts anywhere on a canvas.', icon: Grip },
     { id: 'wall', label: 'Wall', desc: 'A compact grid where posts automatically fit.', icon: Layers },
     { id: 'stream', label: 'Stream', desc: 'Posts appear in a single vertical chronological list.', icon: List },
-    { id: 'timeline', label: 'Timeline', desc: 'milestones on a horizontal line. Attach details to milestones.', icon: History }
+    { id: 'timeline', label: 'Timeline', desc: 'Milestones on a horizontal line with stacked details.', icon: History },
+    { id: 'kanban', label: 'Kanban', desc: 'Columns for categories with draggable cards.', icon: Kanban }
   ];
 
   const handleNextStep = () => {
@@ -240,6 +241,7 @@ const WallDashboard: React.FC<WallDashboardProps> = ({
                         {wall.type === 'wall' && <Layers size={10} />}
                         {wall.type === 'stream' && <List size={10} />}
                         {wall.type === 'timeline' && <History size={10} />}
+                        {wall.type === 'kanban' && <Kanban size={10} />}
                         {wall.type}
                       </span>
                       {wall.isFrozen && <span className="text-[10px] font-black text-indigo-600 uppercase tracking-widest bg-indigo-50 px-2 py-0.5 rounded-md border border-indigo-100 flex items-center gap-1"><Lock size={10} /> Frozen</span>}

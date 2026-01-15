@@ -1,5 +1,6 @@
 
 export const WALL_COLORS = [
+  '#FFFFFF', // Neutral White (Default)
   '#FFCCD4', // Pastel Pink
   '#FFE1CC', // Pastel Peach
   '#FFFFCC', // Pastel Yellow

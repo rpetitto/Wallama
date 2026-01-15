@@ -17,6 +17,8 @@ interface PostProps {
   isWallAnonymous?: boolean;
   isWallFrozen?: boolean;
   isTimelineMilestone?: boolean;
+  isKanbanColumn?: boolean;
+  isKanbanCard?: boolean;
   zoom: number;
 }
 
@@ -39,15 +41,16 @@ const getRelativeTime = (timestamp: number): string => {
 
 const Post: React.FC<PostProps> = ({ 
   post, onDelete, onEdit, onMove, onMoveEnd, onAddDetail, children, 
-  isOwner, snapToGrid, isWallAnonymous, isWallFrozen, isTimelineMilestone, zoom 
+  isOwner, snapToGrid, isWallAnonymous, isWallFrozen, isTimelineMilestone, isKanbanColumn, isKanbanCard, zoom 
 }) => {
   const [isDragging, setIsDragging] = useState(false);
   const [relativeTime, setRelativeTime] = useState(getRelativeTime(post.createdAt));
   const dragStartPos = useRef({ x: 0, y: 0 });
   const postStartPos = useRef({ x: post.x, y: post.y });
   const currentPos = useRef({ x: post.x, y: post.y });
+  const containerRef = useRef<HTMLDivElement>(null);
 
-  const canDrag = isOwner && !isWallFrozen && (post.x !== 0 || post.y !== 0 || isTimelineMilestone);
+  const canDrag = isOwner && !isWallFrozen && (post.x !== 0 || post.y !== 0 || isTimelineMilestone || isKanbanColumn || isKanbanCard);
 
   const renderedMarkdown = useMemo(() => {
     if (post.type !== 'title' && (post.type as string) !== 'text') return null;
@@ -66,10 +69,19 @@ const Post: React.FC<PostProps> = ({
     if (!canDrag) return;
     if ((e.target as HTMLElement).closest('button, video, a, input, [role="button"]')) return;
 
+    let startX = post.x;
+    let startY = post.y;
+
+    // For Kanban cards, we need to capture the current offset relative to the column to simulate dragging from that spot
+    if (isKanbanCard && containerRef.current) {
+        startX = 0; // Relative X inside column usually starts at 0 or effectively 0 for the drag delta
+        startY = containerRef.current.offsetTop;
+    }
+
     setIsDragging(true);
     dragStartPos.current = { x: e.clientX, y: e.clientY };
-    postStartPos.current = { x: post.x, y: post.y };
-    currentPos.current = { x: post.x, y: post.y };
+    postStartPos.current = { x: startX, y: startY };
+    currentPos.current = { x: startX, y: startY };
     
     document.addEventListener('mousemove', handleMouseMove);
     document.addEventListener('mouseup', handleMouseUp);
@@ -81,10 +93,10 @@ const Post: React.FC<PostProps> = ({
     
     let nextX = postStartPos.current.x + dx;
     let nextY = isTimelineMilestone ? postStartPos.current.y : postStartPos.current.y + dy;
-
+    
     if (snapToGrid) {
       nextX = Math.round(nextX / 20) * 20;
-      if (!isTimelineMilestone) nextY = Math.round(nextY / 20) * 20;
+      if (!isTimelineMilestone && !isKanbanColumn && !isKanbanCard) nextY = Math.round(nextY / 20) * 20;
     }
 
     currentPos.current = { x: nextX, y: nextY };
@@ -101,6 +113,14 @@ const Post: React.FC<PostProps> = ({
   };
 
   const renderContent = () => {
+    if (isKanbanColumn) {
+        return (
+            <div className="text-center">
+                <h3 className="text-sm font-black text-slate-800 uppercase tracking-widest">{post.title || post.content}</h3>
+            </div>
+        );
+    }
+
     const pType = (post.type as string);
     switch (pType) {
       case 'title':
@@ -192,68 +212,93 @@ const Post: React.FC<PostProps> = ({
 
   const displayName = isWallAnonymous ? 'Anonymous' : post.authorName;
   const isHexColor = post.color?.startsWith('#');
-  const isWrapperControlled = isTimelineMilestone;
-  const isAbsolute = (isTimelineMilestone) || (!isTimelineMilestone && (post.x !== 0 || post.y !== 0));
+  const isWrapperControlled = isTimelineMilestone || isKanbanColumn || isKanbanCard;
+  
+  // Logic for positioning
+  // Timeline/Kanban Columns are absolute.
+  // Kanban Cards are absolute ONLY when dragging to allow popping out of flow.
+  const isAbsolute = (isTimelineMilestone || isKanbanColumn) || (!isWrapperControlled && (post.x !== 0 || post.y !== 0)) || (isKanbanCard && isDragging);
 
   const containerStyle: React.CSSProperties = {
-    left: (isAbsolute && !isWrapperControlled) ? post.x : undefined,
-    top: (isAbsolute && !isWrapperControlled) ? post.y : undefined,
+    left: (isAbsolute && (!isWrapperControlled || (isKanbanCard && isDragging))) ? post.x : undefined,
+    top: (isAbsolute && (!isWrapperControlled || (isKanbanCard && isDragging))) ? post.y : undefined,
     zIndex: isDragging ? 9999 : post.zIndex,
     backgroundColor: isHexColor ? post.color : undefined,
-    position: (isAbsolute && !isWrapperControlled) ? 'absolute' : 'relative',
+    position: (isAbsolute && (!isWrapperControlled || (isKanbanCard && isDragging))) ? 'absolute' : 'relative',
     width: (isAbsolute || isWrapperControlled) ? '300px' : '100%'
   };
-  
-  const containerClass = `post-container p-4 rounded-2xl shadow-lg border border-black/5 transition-all duration-75 ${!isHexColor ? post.color : ''} group select-none ${isDragging ? 'shadow-2xl z-[9999] scale-[1.02] cursor-grabbing' : (canDrag ? 'cursor-grab' : 'cursor-default')} hover:shadow-2xl`;
+
+  const paddingClass = isKanbanColumn ? 'p-3' : 'p-4';
+  const containerClass = `post-container ${paddingClass} rounded-2xl shadow-lg border border-black/5 transition-all duration-75 ${!isHexColor ? post.color : ''} group select-none ${isDragging ? 'shadow-2xl z-[9999] scale-[1.02] cursor-grabbing' : (canDrag ? 'cursor-grab' : 'cursor-default')} hover:shadow-2xl`;
 
   const PostContent = (
-    <div className={containerClass} style={containerStyle} onMouseDown={handleMouseDown}>
-      <div className="flex items-center justify-between mb-3">
-        <div className="flex items-center gap-2">
-          <div className="h-6 w-6 rounded-full overflow-hidden bg-white/40 border border-black/5 flex items-center justify-center">
-            {post.authorAvatar && !isWallAnonymous ? (
-              <img src={post.authorAvatar} className="h-full w-full object-cover" alt="" referrerPolicy="no-referrer" />
-            ) : (
-              <User size={12} className="text-slate-600" />
+    <div ref={containerRef} className={containerClass} style={containerStyle} onMouseDown={handleMouseDown}>
+      {!isKanbanColumn && (
+          <div className="flex items-center justify-between mb-3">
+            <div className="flex items-center gap-2">
+            <div className="h-6 w-6 rounded-full overflow-hidden bg-white/40 border border-black/5 flex items-center justify-center">
+                {post.authorAvatar && !isWallAnonymous ? (
+                <img src={post.authorAvatar} className="h-full w-full object-cover" alt="" referrerPolicy="no-referrer" />
+                ) : (
+                <User size={12} className="text-slate-600" />
+                )}
+            </div>
+            <span className="text-xs font-bold text-slate-800 truncate max-w-[120px]">{displayName}</span>
+            </div>
+            <div className="flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
+            {isWallFrozen && <Lock size={14} className="text-slate-400 mr-2" />}
+            {isOwner && onEdit && !isWallFrozen && (
+                <button onClick={(e) => { e.stopPropagation(); onEdit(post.id); }} className="p-1.5 text-slate-500 hover:text-cyan-600 hover:bg-cyan-50 rounded-lg transition-colors">
+                <Pencil size={14} />
+                </button>
             )}
-          </div>
-          <span className="text-xs font-bold text-slate-800 truncate max-w-[120px]">{displayName}</span>
+            {isOwner && !isWallFrozen && (
+                <button onClick={(e) => { e.stopPropagation(); onDelete(post.id); }} className="p-1.5 text-slate-500 hover:text-red-500 hover:bg-red-50 rounded-lg transition-colors">
+                <Trash2 size={14} />
+                </button>
+            )}
+            {isOwner && !isWallFrozen && isAbsolute && !isTimelineMilestone && !isKanbanColumn && !isKanbanCard && (
+                <div className="p-1.5 text-slate-400"><GripHorizontal size={16} /></div>
+            )}
+            </div>
         </div>
-        <div className="flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
-          {isWallFrozen && <Lock size={14} className="text-slate-400 mr-2" />}
-          {isOwner && onEdit && !isWallFrozen && (
-            <button onClick={(e) => { e.stopPropagation(); onEdit(post.id); }} className="p-1.5 text-slate-500 hover:text-cyan-600 hover:bg-cyan-50 rounded-lg transition-colors">
-              <Pencil size={14} />
-            </button>
-          )}
-          {isOwner && !isWallFrozen && (
-            <button onClick={(e) => { e.stopPropagation(); onDelete(post.id); }} className="p-1.5 text-slate-500 hover:text-red-500 hover:bg-red-50 rounded-lg transition-colors">
-              <Trash2 size={14} />
-            </button>
-          )}
-          {isOwner && !isWallFrozen && isAbsolute && !isTimelineMilestone && (
-            <div className="p-1.5 text-slate-400"><GripHorizontal size={16} /></div>
-          )}
-        </div>
-      </div>
+      )}
 
-      <div className="min-h-[40px]">
-        {renderContent()}
-        {(post.type !== 'title' && (post.type as string) !== 'text' && post.metadata?.caption) && (
-          <div className="mt-3 pt-3 border-t border-black/5 bg-white/40 -mx-4 px-4 pb-1 rounded-b-xl shadow-inner">
-            <p className="text-sm text-slate-900 font-bold italic flex gap-2">
-              <Quote size={12} className="text-indigo-500 flex-shrink-0 mt-0.5" />
-              {post.metadata.caption}
-            </p>
+      {isKanbanColumn && (
+          <div className="flex items-center justify-between">
+              {renderContent()}
+              <div className="flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
+                {isOwner && onEdit && !isWallFrozen && (
+                    <button onClick={(e) => { e.stopPropagation(); onEdit(post.id); }} className="p-1 text-slate-500 hover:text-cyan-600 hover:bg-cyan-50 rounded-lg transition-colors"><Pencil size={12} /></button>
+                )}
+                {isOwner && !isWallFrozen && (
+                    <button onClick={(e) => { e.stopPropagation(); onDelete(post.id); }} className="p-1 text-slate-500 hover:text-red-500 hover:bg-red-50 rounded-lg transition-colors"><Trash2 size={12} /></button>
+                )}
+              </div>
           </div>
-        )}
-      </div>
+      )}
 
-      <div className="mt-4 pt-3 border-t border-black/5 flex items-center justify-between">
-        <div className="flex items-center gap-1 text-[10px] text-slate-600 font-black uppercase tracking-wider">
-          <Clock size={10} /> {relativeTime}
+      {!isKanbanColumn && (
+        <div className="min-h-[40px]">
+            {renderContent()}
+            {(post.type !== 'title' && (post.type as string) !== 'text' && post.metadata?.caption) && (
+            <div className="mt-3 pt-3 border-t border-black/5 bg-white/40 -mx-4 px-4 pb-1 rounded-b-xl shadow-inner">
+                <p className="text-sm text-slate-900 font-bold italic flex gap-2">
+                <Quote size={12} className="text-indigo-500 flex-shrink-0 mt-0.5" />
+                {post.metadata.caption}
+                </p>
+            </div>
+            )}
         </div>
-      </div>
+      )}
+
+      {!isKanbanColumn && (
+        <div className="mt-4 pt-3 border-t border-black/5 flex items-center justify-between">
+          <div className="flex items-center gap-1 text-[10px] text-slate-600 font-black uppercase tracking-wider">
+            <Clock size={10} /> {relativeTime}
+          </div>
+        </div>
+      )}
     </div>
   );
 
@@ -263,21 +308,16 @@ const Post: React.FC<PostProps> = ({
         className="absolute pointer-events-none group" 
         style={{ left: post.x, top: post.y, width: 0, height: 0, zIndex: isDragging ? 9999 : post.zIndex }}
       >
-        {/* Anchor Dot - Centered on Y=0 relative to this container (which is at axis Y) */}
         <div className="absolute top-[-10px] left-[-10px] w-5 h-5 bg-cyan-600 rounded-full border-4 border-white shadow-md z-20" />
         
-        {/* Top Section: Milestone Post (Above Axis) */}
         <div className="absolute bottom-[20px] left-[-150px] w-[300px] flex flex-col items-center justify-end">
            <div className="w-full pointer-events-auto pb-2">
               {PostContent}
            </div>
-           {/* Connector Stem */}
            <div className="h-6 w-1 bg-cyan-600/30 rounded-full" />
         </div>
 
-        {/* Bottom Section: Details (Below Axis) */}
         <div className="absolute top-[20px] left-[-150px] w-[300px] flex flex-col items-center justify-start">
-            {/* Connector Stem */}
             {(children || onAddDetail) && <div className="h-6 w-1 bg-cyan-600/30 absolute -top-6 rounded-full" />}
             
             <div className="flex flex-col items-center gap-3 w-full pointer-events-auto">
@@ -296,6 +336,31 @@ const Post: React.FC<PostProps> = ({
         </div>
       </div>
     );
+  }
+
+  if (isKanbanColumn) {
+     return (
+        <div 
+            className="absolute flex flex-col items-center pointer-events-none" 
+            style={{ left: post.x, top: 0, width: '320px', height: '100%', zIndex: isDragging ? 9999 : 1 }}
+        >
+            <div className="w-full pointer-events-auto mb-4">
+                {PostContent}
+            </div>
+            
+            <div className="w-full flex-1 flex flex-col gap-3 pointer-events-auto px-1 pb-20">
+                {children}
+                {!isWallFrozen && onAddDetail && (
+                    <button 
+                        onClick={(e) => { e.stopPropagation(); onAddDetail(post.id); }}
+                        className="w-full py-3 border-2 border-dashed border-slate-300 rounded-2xl text-slate-400 font-bold hover:bg-white/50 hover:border-cyan-400 hover:text-cyan-600 transition-colors flex items-center justify-center gap-2"
+                    >
+                        <Plus size={16} /> Add Card
+                    </button>
+                )}
+            </div>
+        </div>
+     )
   }
 
   return PostContent;

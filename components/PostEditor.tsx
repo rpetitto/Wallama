@@ -14,12 +14,13 @@ interface PostEditorProps {
   authorName: string;
   initialPost?: Post;
   parentId?: string;
+  isKanbanColumn?: boolean;
 }
 
 const GIPHY_API_KEY = 'eo5zSu2rUveZJB4kxO3S1Rv57KkMbhiQ'; 
 const GOOGLE_CLIENT_ID = "6888240288-5v0p6nsoi64q1puv1vpvk1njd398ra8b.apps.googleusercontent.com";
 
-const PostEditor: React.FC<PostEditorProps> = ({ onClose, onSubmit, authorName, initialPost, parentId }) => {
+const PostEditor: React.FC<PostEditorProps> = ({ onClose, onSubmit, authorName, initialPost, parentId, isKanbanColumn }) => {
   const [type, setType] = useState<PostType>('title');
   const [titleText, setTitleText] = useState('');
   const [content, setContent] = useState('');
@@ -233,7 +234,8 @@ const PostEditor: React.FC<PostEditorProps> = ({ onClose, onSubmit, authorName, 
     }
 
     if (!submissionContent && type !== 'title') return;
-    if (type === 'title' && !submissionTitle && !submissionContent) return;
+    if (type === 'title' && !submissionTitle && !submissionContent && !isKanbanColumn) return;
+    if (isKanbanColumn && !submissionTitle && !submissionContent) return;
 
     setIsCheckingSafety(true);
     const safetyResult = await checkContentSafety(submissionTitle + ' ' + submissionContent + ' ' + caption, (type === 'image' && url.startsWith('data:')) ? url : undefined);
@@ -325,55 +327,60 @@ const PostEditor: React.FC<PostEditorProps> = ({ onClose, onSubmit, authorName, 
     <div className="fixed inset-0 z-[100] flex items-center justify-center p-4 bg-slate-900/60 backdrop-blur-sm animate-in fade-in duration-300">
       <div className={`w-full max-w-xl rounded-3xl shadow-2xl overflow-hidden flex flex-col max-h-[90vh] transition-colors duration-300 ${!isHexColor && selectedColor === 'bg-white' ? 'bg-white' : (!isHexColor ? selectedColor : '')}`} style={{ backgroundColor: isHexColor ? selectedColor : undefined }}>
         <div className="p-6 border-b border-black/5 flex items-center justify-between bg-white/50 backdrop-blur-sm">
-          <h3 className="text-xl font-bold text-slate-800">{initialPost ? 'Edit Post' : 'Create Post'}</h3>
+          <h3 className="text-xl font-bold text-slate-800">{initialPost ? 'Edit Post' : (isKanbanColumn ? 'New Category' : 'Create Post')}</h3>
           <button onClick={onClose} className="p-2 hover:bg-black/5 rounded-full transition-colors text-slate-500"><X size={20} /></button>
         </div>
 
         <div className="p-6 overflow-y-auto flex-1 space-y-6 custom-scrollbar">
-          <div className="flex gap-2 p-1 bg-black/5 rounded-xl overflow-x-auto">
-            {[
-              { id: 'title', icon: Type, label: 'Title' },
-              { id: 'image', icon: ImageIcon, label: 'Image' },
-              { id: 'link', icon: LinkIcon, label: 'Link' },
-              { id: 'gif', icon: Gift, label: 'GIF' },
-              { id: 'video', icon: Video, label: 'Video' }
-            ].map((tab) => (
-              <button key={tab.id} onClick={() => { setType(tab.id as PostType); setSafetyError(null); }} className={`flex-1 min-w-[60px] flex flex-col items-center gap-1 py-3 px-2 rounded-lg transition-all ${type === tab.id ? 'bg-white shadow-sm text-cyan-600' : 'text-slate-500 hover:bg-black/5'}`}>
-                <tab.icon size={20} />
-                <span className="text-[10px] font-bold uppercase tracking-widest">{tab.label}</span>
-              </button>
-            ))}
-          </div>
+          {!isKanbanColumn && (
+              <div className="flex gap-2 p-1 bg-black/5 rounded-xl overflow-x-auto">
+                {[
+                  { id: 'title', icon: Type, label: 'Title' },
+                  { id: 'image', icon: ImageIcon, label: 'Image' },
+                  { id: 'link', icon: LinkIcon, label: 'Link' },
+                  { id: 'gif', icon: Gift, label: 'GIF' },
+                  { id: 'video', icon: Video, label: 'Video' }
+                ].map((tab) => (
+                  <button key={tab.id} onClick={() => { setType(tab.id as PostType); setSafetyError(null); }} className={`flex-1 min-w-[60px] flex flex-col items-center gap-1 py-3 px-2 rounded-lg transition-all ${type === tab.id ? 'bg-white shadow-sm text-cyan-600' : 'text-slate-500 hover:bg-black/5'}`}>
+                    <tab.icon size={20} />
+                    <span className="text-[10px] font-bold uppercase tracking-widest">{tab.label}</span>
+                  </button>
+                ))}
+              </div>
+          )}
 
           <div className="space-y-4">
             {type === 'title' && (
               <div className="space-y-4">
+                {!isKanbanColumn && (
+                    <div className="space-y-2">
+                    <label className="text-xs font-black text-slate-400 uppercase tracking-widest ml-1">Header Image (Optional)</label>
+                    {imagePicker}
+                    </div>
+                )}
                 <div className="space-y-2">
-                   <label className="text-xs font-black text-slate-400 uppercase tracking-widest ml-1">Header Image (Optional)</label>
-                   {imagePicker}
+                   <label className="text-xs font-black text-slate-400 uppercase tracking-widest ml-1">{isKanbanColumn ? 'Category Name' : 'Headline (1-Line)'}</label>
+                   <input type="text" value={titleText} onChange={e => setTitleText(e.target.value)} placeholder={isKanbanColumn ? "e.g. To Do, In Progress" : "Main Heading..."} className="w-full p-4 bg-white/50 border border-black/5 rounded-xl outline-none text-lg font-black text-slate-900" />
                 </div>
-                <div className="space-y-2">
-                   <label className="text-xs font-black text-slate-400 uppercase tracking-widest ml-1">Headline (1-Line)</label>
-                   <input type="text" value={titleText} onChange={e => setTitleText(e.target.value)} placeholder="Main Heading..." className="w-full p-4 bg-white/50 border border-black/5 rounded-xl outline-none text-lg font-black text-slate-900" />
-                </div>
-                <div className="relative">
-                  <label className="block text-xs font-black text-slate-400 uppercase tracking-widest mb-2 ml-1">Body Text</label>
-                  
-                  {/* Markdown Toolbar */}
-                  <div className="flex flex-wrap gap-1 p-1 bg-black/5 rounded-t-xl border-x border-t border-black/5">
-                    <button onClick={() => insertFormat('**', '**')} className="p-2 hover:bg-white rounded-lg text-slate-600" title="Bold"><Bold size={16} /></button>
-                    <button onClick={() => insertFormat('_', '_')} className="p-2 hover:bg-white rounded-lg text-slate-600" title="Italic"><Italic size={16} /></button>
-                    <button onClick={() => insertFormat('<u>', '</u>')} className="p-2 hover:bg-white rounded-lg text-slate-600" title="Underline"><Underline size={16} /></button>
-                    <div className="w-px h-6 bg-black/10 mx-1 self-center" />
-                    <button onClick={() => insertFormat('- ')} className="p-2 hover:bg-white rounded-lg text-slate-600" title="Bullet List"><List size={16} /></button>
-                    <button onClick={() => insertFormat('1. ')} className="p-2 hover:bg-white rounded-lg text-slate-600" title="Numbered List"><ListOrdered size={16} /></button>
-                    <button onClick={() => insertFormat('> ')} className="p-2 hover:bg-white rounded-lg text-slate-600" title="Quote"><Quote size={16} /></button>
-                    <button onClick={() => insertFormat('`', '`')} className="p-2 hover:bg-white rounded-lg text-slate-600" title="Code"><Code size={16} /></button>
-                  </div>
+                {!isKanbanColumn && (
+                    <div className="relative">
+                    <label className="block text-xs font-black text-slate-400 uppercase tracking-widest mb-2 ml-1">Body Text</label>
+                    
+                    <div className="flex flex-wrap gap-1 p-1 bg-black/5 rounded-t-xl border-x border-t border-black/5">
+                        <button onClick={() => insertFormat('**', '**')} className="p-2 hover:bg-white rounded-lg text-slate-600" title="Bold"><Bold size={16} /></button>
+                        <button onClick={() => insertFormat('_', '_')} className="p-2 hover:bg-white rounded-lg text-slate-600" title="Italic"><Italic size={16} /></button>
+                        <button onClick={() => insertFormat('<u>', '</u>')} className="p-2 hover:bg-white rounded-lg text-slate-600" title="Underline"><Underline size={16} /></button>
+                        <div className="w-px h-6 bg-black/10 mx-1 self-center" />
+                        <button onClick={() => insertFormat('- ')} className="p-2 hover:bg-white rounded-lg text-slate-600" title="Bullet List"><List size={16} /></button>
+                        <button onClick={() => insertFormat('1. ')} className="p-2 hover:bg-white rounded-lg text-slate-600" title="Numbered List"><ListOrdered size={16} /></button>
+                        <button onClick={() => insertFormat('> ')} className="p-2 hover:bg-white rounded-lg text-slate-600" title="Quote"><Quote size={16} /></button>
+                        <button onClick={() => insertFormat('`', '`')} className="p-2 hover:bg-white rounded-lg text-slate-600" title="Code"><Code size={16} /></button>
+                    </div>
 
-                  <textarea ref={textareaRef} value={content} onChange={(e) => setContent(e.target.value)} placeholder="Enter details or thoughts..." className="w-full h-32 p-4 bg-white/50 border border-black/5 rounded-b-2xl focus:ring-4 focus:ring-cyan-500/20 focus:border-cyan-500 outline-none resize-none text-base font-medium text-slate-900" />
-                  <button onClick={handleRefine} disabled={!content || isRefining} className="absolute bottom-4 right-4 flex items-center gap-2 px-3 py-1.5 bg-cyan-600 text-white rounded-full text-xs font-bold shadow-md transition-all"><Sparkles size={14} /> {isRefining ? '...' : 'AI Refine'}</button>
-                </div>
+                    <textarea ref={textareaRef} value={content} onChange={(e) => setContent(e.target.value)} placeholder="Enter details or thoughts..." className="w-full h-32 p-4 bg-white/50 border border-black/5 rounded-b-2xl focus:ring-4 focus:ring-cyan-500/20 focus:border-cyan-500 outline-none resize-none text-base font-medium text-slate-900" />
+                    <button onClick={handleRefine} disabled={!content || isRefining} className="absolute bottom-4 right-4 flex items-center gap-2 px-3 py-1.5 bg-cyan-600 text-white rounded-full text-xs font-bold shadow-md transition-all"><Sparkles size={14} /> {isRefining ? '...' : 'AI Refine'}</button>
+                    </div>
+                )}
               </div>
             )}
 
@@ -417,7 +424,7 @@ const PostEditor: React.FC<PostEditorProps> = ({ onClose, onSubmit, authorName, 
               </div>
             )}
 
-            {(type !== 'title') && (
+            {(type !== 'title' && !isKanbanColumn) && (
               <div className="pt-2">
                 <label className="block text-xs font-black text-slate-400 uppercase tracking-widest mb-2">Caption (Optional)</label>
                 <input type="text" value={caption} onChange={(e) => setCaption(e.target.value)} placeholder="Add some context..." className="w-full px-4 py-3 bg-white/50 border border-black/5 rounded-xl outline-none text-sm" />
@@ -439,7 +446,7 @@ const PostEditor: React.FC<PostEditorProps> = ({ onClose, onSubmit, authorName, 
 
         <div className="p-6 border-t border-black/5 bg-white/50 flex justify-end">
           <button onClick={handleSubmit} disabled={isCheckingSafety} className="px-8 py-3 bg-cyan-600 text-white rounded-xl font-bold shadow-lg hover:bg-cyan-700 disabled:opacity-50">
-            {isCheckingSafety ? <Loader2 className="animate-spin" size={18} /> : 'Post to Wall'}
+            {isCheckingSafety ? <Loader2 className="animate-spin" size={18} /> : (isKanbanColumn ? 'Create Category' : 'Post to Wall')}
           </button>
         </div>
       </div>

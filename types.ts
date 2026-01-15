@@ -40,7 +40,7 @@ export interface Post {
 }
 
 export type PrivacyType = 'public' | 'private' | 'link' | 'domain';
-export type WallType = 'freeform' | 'wall' | 'stream' | 'timeline';
+export type WallType = 'freeform' | 'wall' | 'stream' | 'timeline' | 'kanban';
 
 export interface Wall {
   id: string;
