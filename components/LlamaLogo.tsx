@@ -9,7 +9,7 @@ interface LlamaLogoProps {
 export const LlamaLogo: React.FC<LlamaLogoProps> = ({ className = "w-12 h-12" }) => {
   return (
     <img 
-      src="/logo.png" 
+      src="https://res.cloudinary.com/robertpetitto/image/upload/v1768482715/Wallama/logo.png" 
       alt="Wallama Logo" 
       className={`object-contain ${className}`}
     />

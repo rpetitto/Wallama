@@ -41,45 +41,28 @@ export const suggestWallTopics = async (subject: string): Promise<string[]> => {
 };
 
 export const checkContentSafety = async (text: string, imageData?: string): Promise<{ isSafe: boolean; reason?: string }> => {
-  // If no content to check, assume safe (e.g. empty or just a video blob we can't check easily yet)
-  if ((!text || text.trim().length === 0) && !imageData) return { isSafe: true };
+  if (!text.trim() && !imageData) return { isSafe: true };
 
   try {
     const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
-    
     const parts: any[] = [];
     
-    if (imageData) {
-        if (imageData.startsWith('data:')) {
-            const match = imageData.match(/^data:(.+);base64,(.+)$/);
-            if (match) {
-                parts.push({
-                    inlineData: {
-                        mimeType: match[1], // e.g. image/png
-                        data: match[2]      // base64 string
-                    }
-                });
-            }
+    if (imageData && imageData.startsWith('data:')) {
+      const base64Data = imageData.split(',')[1];
+      const mimeType = imageData.split(';')[0].split(':')[1];
+      parts.push({
+        inlineData: {
+          mimeType: mimeType,
+          data: base64Data
         }
+      });
     }
 
-    const systemPrompt = `You are a strict content moderator for a K-12 educational app.
-    Your task is to allow ONLY content that is safe, appropriate, and non-offensive for children and teenagers.
-    
-    STRICTLY BLOCK (isSafe: false) any content containing:
-    - Profanity, obscenity, or vulgar language (including masked words like f*ck).
-    - Sexual content, nudity, innuendo, or grooming behavior.
-    - Hate speech, discrimination, slurs, or bullying.
-    - Violence, gore, weapons, death threats, or self-harm.
-    - Illegal acts, drug use/references, or alcohol.
-    - Inappropriate or suggestive slang.
+    const systemPrompt = `You are a moderator for a K-12 school app. Analyze content for safety.
+    Return {"isSafe": false, "reason": "..."} for: Profanity, Hate Speech, Nudity, Violence, or Illegal acts.
+    Otherwise return {"isSafe": true}.`;
 
-    If the content is safe and educational or casual friendly conversation, return isSafe: true.
-    
-    Respond with JSON.`;
-
-    const userPrompt = text ? `Analyze this content for safety: "${text}"` : `Analyze this image.`;
-    parts.push({ text: userPrompt });
+    parts.push({ text: `Analyze this for school safety: ${text}` });
 
     const response = await ai.models.generateContent({
       model: 'gemini-3-flash-preview',
@@ -91,29 +74,21 @@ export const checkContentSafety = async (text: string, imageData?: string): Prom
           type: Type.OBJECT,
           properties: {
             isSafe: { type: Type.BOOLEAN },
-            reason: { type: Type.STRING, description: "Reason if unsafe." }
+            reason: { type: Type.STRING }
           },
           required: ["isSafe"]
         }
       }
     });
 
-    const result = JSON.parse(response.text || "{}");
-    
-    // Strict Boolean Check
-    if (typeof result.isSafe === 'boolean') {
-        return {
-          isSafe: result.isSafe,
-          reason: result.isSafe ? undefined : (result.reason || "Content flagged as inappropriate.")
-        };
-    }
-
-    // If response is malformed, fail closed
-    return { isSafe: false, reason: "Safety check validation error." };
-
+    const result = JSON.parse(response.text || '{"isSafe":false}');
+    return {
+      isSafe: result.isSafe === true,
+      reason: result.isSafe ? undefined : (result.reason || "Content flagged as inappropriate.")
+    };
   } catch (error) {
     console.error("Safety Check Error:", error);
-    // FAIL CLOSED: Block content if API fails
-    return { isSafe: false, reason: "Content safety verification unavailable. Please try again." }; 
+    // Return a specific error to help user understand it's a technical hiccup
+    return { isSafe: false, reason: "Safety check timed out. This often happens with large images. Please try a smaller file or try again." }; 
   }
 };

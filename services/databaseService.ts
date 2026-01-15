@@ -37,7 +37,7 @@ const mapPostFromDB = (dbPost: any): Post => {
     content: dbPost.content || '',
     authorName: dbPost.author_name || 'Anonymous',
     authorId: dbPost.author_id || '',
-    authorAvatar: dbPost.author_avatar || undefined,
+    // Removed authorAvatar mapping since column is missing in user's current schema
     createdAt: dbPost.created_at ? new Date(dbPost.created_at).getTime() : Date.now(),
     x: Number(dbPost.x) || 0,
     y: Number(dbPost.y) || 0,
@@ -189,7 +189,7 @@ export const databaseService = {
         content: post.content || '',
         author_name: post.authorName || 'Anonymous',
         author_id: post.authorId || 'anon',
-        author_avatar: post.authorAvatar || null,
+        // Removed author_avatar because it's not in user's provided schema
         x: Math.round(post.x || 100),
         y: Math.round(post.y || 100),
         z_index: Math.round(nextZ),
@@ -203,7 +203,10 @@ export const databaseService = {
         .insert([fullPayload])
         .select().single();
 
-      if (error) throw error;
+      if (error) {
+        console.error("Supabase Post Insertion Error:", error.message, error.details);
+        throw error;
+      }
       return mapPostFromDB(data);
 
     } catch (err) {

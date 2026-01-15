@@ -198,7 +198,7 @@ const Post: React.FC<PostProps> = ({
   return (
     <div className={`flex flex-col items-center gap-4 ${isTimelineMilestone ? 'pointer-events-auto' : ''}`}>
       {isTimelineMilestone && (
-        <div className="h-8 w-1 bg-white/40 shadow-sm" />
+        <div className="h-10 w-1.5 bg-white/50 shadow-sm rounded-full mb-[-8px]" />
       )}
       <div 
         className={containerClass}

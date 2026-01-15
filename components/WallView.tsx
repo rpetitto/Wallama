@@ -155,14 +155,10 @@ const WallView: React.FC<WallViewProps> = ({
         });
         optimisticPosts.current.forEach((op, id) => { if (!remoteIds.has(id)) combinedPosts.push(op); });
         
-        // Sorting logic based on layout type
         if (remoteWall.type === 'timeline') {
            combinedPosts.sort((a, b) => {
-              // If both are attachments to the same parent, use creation time
               if (a.parentId && b.parentId && a.parentId === b.parentId) return a.createdAt - b.createdAt;
-              // If both are milestones, use X coordinate for drag-to-reorder
               if (!a.parentId && !b.parentId) return a.x - b.x;
-              // Default to creation time for others
               return a.createdAt - b.createdAt;
            });
         } else if (remoteWall.type === 'freeform') {
@@ -322,7 +318,6 @@ const WallView: React.FC<WallViewProps> = ({
       if (!prev) return prev;
       const maxZ = Math.max(0, ...prev.posts.map(p => p.zIndex));
       const targetPost = prev.posts.find(p => p.id === id);
-      // Lock Y if timeline milestone (no parentId)
       const finalY = (prev.type === 'timeline' && !targetPost?.parentId) ? TIMELINE_AXIS_Y : y;
       const updatedPosts = prev.posts.map(p => p.id === id ? { ...p, x, y: finalY, zIndex: maxZ + 1 } : p);
       const movedPost = updatedPosts.find(p => p.id === id);
@@ -456,10 +451,8 @@ const WallView: React.FC<WallViewProps> = ({
     ? { backgroundImage: `url(${wall.background})`, backgroundSize: 'cover', backgroundPosition: 'center', backgroundAttachment: 'fixed' }
     : { background: wall.background.includes('from-') ? undefined : wall.background };
 
-  // Helper for universal image preview in settings tabs
   const isImageBackground = (settingsForm.background?.startsWith('http') || settingsForm.background?.startsWith('data:image')) && !WALL_GRADIENTS.includes(settingsForm.background!);
 
-  // Grouping logic for Timeline / Hierarchical layouts
   const milestones = wall.posts.filter(p => !p.parentId);
   const getAttachments = (parentId: string) => wall.posts.filter(p => p.parentId === parentId);
 
@@ -476,7 +469,7 @@ const WallView: React.FC<WallViewProps> = ({
       onTouchMove={handleTouchMove}
       onTouchEnd={handleTouchEnd}
     >
-      <header className="relative z-[100] bg-white/80 backdrop-blur-xl border-b border-slate-200/50 px-6 py-4 flex items-center justify-between">
+      <header className="sticky top-0 z-[100] bg-white/80 backdrop-blur-xl border-b border-slate-200/50 px-6 py-4 flex items-center justify-between">
         <div className="flex items-center gap-4">
           <button onClick={onBack} className="p-2 hover:bg-slate-100 rounded-xl text-slate-500 transition-colors"><ChevronLeft size={24} /></button>
           <div className="flex items-center gap-3">
@@ -505,16 +498,15 @@ const WallView: React.FC<WallViewProps> = ({
         </div>
       </header>
 
-      <main id="canvas-root" className={`flex-1 relative ${isCanvasMode ? 'overflow-hidden' : 'overflow-y-auto custom-scrollbar p-10 pb-40'} ${wall.isFrozen || isInteractionBlocked ? 'cursor-default pointer-events-none' : (isCanvasMode ? 'cursor-grab active:cursor-grabbing' : '')}`}>
+      <main id="canvas-root" className={`flex-1 relative ${isCanvasMode ? 'overflow-hidden' : 'overflow-y-auto custom-scrollbar p-6 pb-40'} ${wall.isFrozen || isInteractionBlocked ? 'cursor-default pointer-events-none' : (isCanvasMode ? 'cursor-grab active:cursor-grabbing' : '')}`}>
         {isCanvasMode ? (
            <div 
              className="absolute origin-top-left transition-transform duration-75"
              style={{ transform: `translate(${pan.x}px, ${pan.y}px) scale(${zoom})` }}
            >
              <div className="relative w-[10000px] h-[10000px]">
-               {/* Timeline Axis Line */}
                {wall.type === 'timeline' && (
-                  <div className="absolute top-[242px] left-0 right-0 h-1.5 bg-white/30 shadow-sm z-0 pointer-events-none" />
+                  <div className="absolute top-[242px] left-0 right-0 h-1 bg-white/40 shadow-sm z-0 pointer-events-none" />
                )}
 
                {wall.type === 'timeline' ? (
@@ -555,9 +547,9 @@ const WallView: React.FC<WallViewProps> = ({
              </div>
            </div>
         ) : (
-          <div className={wall.type === 'wall' ? "max-w-7xl mx-auto columns-1 sm:columns-2 lg:columns-3 gap-6 space-y-6" : "max-w-3xl mx-auto space-y-6"}>
+          <div className={wall.type === 'wall' ? "max-w-7xl mx-auto columns-1 sm:columns-2 lg:columns-3 gap-4" : "max-w-3xl mx-auto space-y-4"}>
             {wall.posts.map(post => (
-              <div key={post.id} className="break-inside-avoid">
+              <div key={post.id} className="break-inside-avoid mb-4">
                 <Post 
                   post={{...post, x: 0, y: 0}} zoom={1}
                   onDelete={(id) => { setWall(prev => prev ? ({ ...prev, posts: prev.posts.filter(p => p.id !== id) }) : null); onDeletePost(id); }} 
@@ -606,7 +598,6 @@ const WallView: React.FC<WallViewProps> = ({
               <button onClick={() => setShowSettings(false)} className="p-2 hover:bg-slate-100 rounded-full text-slate-400"><X size={24} /></button>
             </div>
             <div className="flex-1 overflow-y-auto custom-scrollbar p-6 space-y-8">
-              {/* Identity Section */}
               <section className="space-y-4">
                 <h4 className="text-xs font-black text-slate-600 uppercase tracking-widest flex items-center gap-2"><ImageIcon size={14} /> Identity</h4>
                 <div className="grid grid-cols-[auto_1fr] gap-4">
@@ -631,7 +622,6 @@ const WallView: React.FC<WallViewProps> = ({
                 </div>
               </section>
 
-              {/* Appearance Section */}
               <section className="space-y-4">
                 <h4 className="text-xs font-black text-slate-600 uppercase tracking-widest flex items-center gap-2"><LayoutGrid size={14} /> Background</h4>
                 
@@ -732,7 +722,6 @@ const WallView: React.FC<WallViewProps> = ({
                 </div>
               </section>
 
-              {/* Controls Section */}
               <section className="space-y-4">
                 <h4 className="text-xs font-black text-slate-600 uppercase tracking-widest flex items-center gap-2"><Lock size={14} /> Access Control</h4>
                 <div className="flex items-center justify-between p-4 bg-slate-50 rounded-2xl border border-slate-100">
@@ -755,7 +744,6 @@ const WallView: React.FC<WallViewProps> = ({
         </div>
       )}
 
-      {/* Delete Confirm Modal */}
       {showDeleteConfirm && (
           <div className="fixed inset-0 z-[500] bg-slate-900/60 backdrop-blur-md flex items-center justify-center p-4" onClick={() => setShowDeleteConfirm(false)}>
               <div className="bg-white rounded-[2rem] p-8 max-w-sm w-full text-center space-y-6 animate-in zoom-in-95" onClick={e => e.stopPropagation()}>
@@ -770,10 +758,9 @@ const WallView: React.FC<WallViewProps> = ({
           </div>
       )}
 
-      {/* Share Modals */}
       {showShareOverlay && (
         <div className="fixed inset-0 z-[300] bg-slate-900/60 backdrop-blur-md flex items-center justify-center p-4 modal-overlay" onClick={() => setShowShareOverlay(false)}>
-            <div className="bg-white rounded-[2.5rem] shadow-2xl p-8 max-w-sm w-full text-center space-y-6 relative" onClick={e => e.stopPropagation()}>
+            <div className="bg-white rounded-[2.5rem] shadow-2xl p-8 max-sm w-full text-center space-y-6 relative" onClick={e => e.stopPropagation()}>
                 <button onClick={() => setShowShareOverlay(false)} className="absolute top-6 right-6 p-2 text-slate-400 hover:text-slate-600"><X size={24} /></button>
                 <h3 className="text-2xl font-black text-slate-800">Join this Wall</h3>
                 <div className="bg-white p-4 rounded-3xl border-2 border-cyan-100 inline-block shadow-sm">
