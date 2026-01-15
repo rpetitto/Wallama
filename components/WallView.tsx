@@ -155,11 +155,14 @@ const WallView: React.FC<WallViewProps> = ({
         });
         optimisticPosts.current.forEach((op, id) => { if (!remoteIds.has(id)) combinedPosts.push(op); });
         
-        // Timeline milestones use X for ordering, attachments use createdAt
+        // Sorting logic based on layout type
         if (remoteWall.type === 'timeline') {
            combinedPosts.sort((a, b) => {
+              // If both are attachments to the same parent, use creation time
               if (a.parentId && b.parentId && a.parentId === b.parentId) return a.createdAt - b.createdAt;
+              // If both are milestones, use X coordinate for drag-to-reorder
               if (!a.parentId && !b.parentId) return a.x - b.x;
+              // Default to creation time for others
               return a.createdAt - b.createdAt;
            });
         } else if (remoteWall.type === 'freeform') {
@@ -318,8 +321,9 @@ const WallView: React.FC<WallViewProps> = ({
     setWall(prev => {
       if (!prev) return prev;
       const maxZ = Math.max(0, ...prev.posts.map(p => p.zIndex));
-      // Lock Y if timeline milestone
-      const finalY = (prev.type === 'timeline' && !prev.posts.find(p => p.id === id)?.parentId) ? TIMELINE_AXIS_Y : y;
+      const targetPost = prev.posts.find(p => p.id === id);
+      // Lock Y if timeline milestone (no parentId)
+      const finalY = (prev.type === 'timeline' && !targetPost?.parentId) ? TIMELINE_AXIS_Y : y;
       const updatedPosts = prev.posts.map(p => p.id === id ? { ...p, x, y: finalY, zIndex: maxZ + 1 } : p);
       const movedPost = updatedPosts.find(p => p.id === id);
       if (movedPost) { optimisticPosts.current.set(id, movedPost); scheduleOptimisticCleanup(id); }

@@ -156,10 +156,13 @@ export const databaseService = {
         }])
         .select().single();
 
-      if (error) throw error;
+      if (error) {
+          console.error("Supabase Wall Creation Error:", error.message, error.details);
+          throw error;
+      }
       return mapWallFromDB({ ...data, posts: [] });
     } catch (err) {
-      console.error("SQL createWall error:", err);
+      console.error("Application SQL createWall error:", err);
       return null;
     }
   },
