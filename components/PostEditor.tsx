@@ -30,7 +30,6 @@ const PostEditor: React.FC<PostEditorProps> = ({ onClose, onSubmit, authorName, 
   const [isRecording, setIsRecording] = useState(false);
   const [videoBase64, setVideoBase64] = useState<string | null>(null);
   const [videoThumbnail, setVideoThumbnail] = useState<string | null>(null);
-  const [videoDuration, setVideoDuration] = useState(0);
   const [isRefining, setIsRefining] = useState(false);
   const [isFetchingLink, setIsFetchingLink] = useState(false);
   const [linkMetadata, setLinkMetadata] = useState<any>(null);
@@ -42,7 +41,6 @@ const PostEditor: React.FC<PostEditorProps> = ({ onClose, onSubmit, authorName, 
   const [imageUrlInput, setImageUrlInput] = useState('');
   const [isImageSearching, setIsImageSearching] = useState(false);
   const [driveFiles, setDriveFiles] = useState<any[]>([]);
-  const [isDriveLoading, setIsDriveLoading] = useState(false);
   const [driveToken, setDriveToken] = useState<string | null>(sessionStorage.getItem('google_drive_token'));
 
   const [gifSearch, setGifSearch] = useState('');
@@ -54,7 +52,6 @@ const PostEditor: React.FC<PostEditorProps> = ({ onClose, onSubmit, authorName, 
   const mediaRecorderRef = useRef<MediaRecorder | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const driveTokenClient = useRef<any>(null);
-  const textareaRef = useRef<HTMLTextAreaElement>(null);
 
   useEffect(() => {
     if (initialPost) {
@@ -64,7 +61,7 @@ const PostEditor: React.FC<PostEditorProps> = ({ onClose, onSubmit, authorName, 
       setCaption(initialPost.metadata?.caption || '');
       if (pType === 'title') {
         setTitleText(initialPost.metadata?.title || '');
-        setContent(initialPost.content);
+        setContent(initialPost.content || '');
         setHeaderImage(initialPost.metadata?.image || null);
       } else if (pType === 'video') {
          setVideoBase64(initialPost.content);
@@ -95,7 +92,6 @@ const PostEditor: React.FC<PostEditorProps> = ({ onClose, onSubmit, authorName, 
   }, []);
 
   const fetchDriveFiles = async (token: string, query: string = '') => {
-    setIsDriveLoading(true);
     try {
         let q = "trashed = false and mimeType contains 'image/'";
         if (query) q += ` and name contains '${query}'`;
@@ -106,7 +102,7 @@ const PostEditor: React.FC<PostEditorProps> = ({ onClose, onSubmit, authorName, 
             const data = await res.json();
             setDriveFiles(data.files || []);
         }
-    } catch (e) { console.error(e); } finally { setIsDriveLoading(false); }
+    } catch (e) { console.error(e); }
   };
 
   const performImageSearch = async () => {
@@ -116,7 +112,7 @@ const PostEditor: React.FC<PostEditorProps> = ({ onClose, onSubmit, authorName, 
         const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
         const response = await ai.models.generateContent({
             model: 'gemini-3-flash-preview',
-            contents: `Find a direct high-quality image URL for: "${imageSearch}". Return ONLY the raw URL string.`,
+            contents: `Find a direct image URL for: "${imageSearch}". Return ONLY the raw URL string.`,
             config: { tools: [{ googleSearch: {} }] }
         });
         const foundUrl = response.text.trim().replace(/`/g, '');
@@ -214,9 +210,9 @@ const PostEditor: React.FC<PostEditorProps> = ({ onClose, onSubmit, authorName, 
       submissionContent = url;
       submissionMetadata = { ...submissionMetadata, ...linkMetadata };
     } else if (type === 'title') {
-      submissionContent = content;
+      submissionContent = content; // Body
       submissionMetadata.image = headerImage;
-      submissionMetadata.title = titleText;
+      submissionMetadata.title = titleText; // Header
     }
 
     if (!submissionContent && type !== 'title') return;
@@ -347,11 +343,12 @@ const PostEditor: React.FC<PostEditorProps> = ({ onClose, onSubmit, authorName, 
                    <ImagePickerUI />
                 </div>
                 <div className="space-y-2">
-                   <label className="text-xs font-black text-slate-400 uppercase tracking-widest ml-1">Header Text (1-Line)</label>
+                   <label className="text-xs font-black text-slate-400 uppercase tracking-widest ml-1">Headline (1-Line)</label>
                    <input type="text" value={titleText} onChange={e => setTitleText(e.target.value)} placeholder="Main Heading..." className="w-full p-4 bg-white/50 border border-black/5 rounded-xl outline-none text-lg font-black text-slate-900" />
                 </div>
                 <div className="relative">
-                  <textarea ref={textareaRef} value={content} onChange={(e) => setContent(e.target.value)} placeholder="Enter details or thoughts..." className="w-full h-32 p-4 bg-white/50 border border-black/5 rounded-2xl focus:ring-4 focus:ring-cyan-500/20 focus:border-cyan-500 outline-none resize-none text-base font-medium text-slate-900" />
+                  <label className="block text-xs font-black text-slate-400 uppercase tracking-widest mb-2 ml-1">Body (Supports Markdown)</label>
+                  <textarea value={content} onChange={(e) => setContent(e.target.value)} placeholder="Enter details or thoughts..." className="w-full h-32 p-4 bg-white/50 border border-black/5 rounded-2xl focus:ring-4 focus:ring-cyan-500/20 focus:border-cyan-500 outline-none resize-none text-base font-medium text-slate-900" />
                   <button onClick={handleRefine} disabled={!content || isRefining} className="absolute bottom-4 right-4 flex items-center gap-2 px-3 py-1.5 bg-cyan-600 text-white rounded-full text-xs font-bold shadow-md transition-all"><Sparkles size={14} /> {isRefining ? '...' : 'AI Refine'}</button>
                 </div>
               </div>
@@ -361,7 +358,7 @@ const PostEditor: React.FC<PostEditorProps> = ({ onClose, onSubmit, authorName, 
 
             {type === 'link' && (
               <div className="space-y-4">
-                <input type="text" value={url} onBlur={() => fetchLinkMetadata(url)} onChange={(e) => setUrl(e.target.value)} placeholder="https://example.com" className="w-full p-4 bg-white/50 border border-black/5 rounded-xl outline-none text-slate-900" />
+                <input type="text" value={url} onBlur={() => fetchLinkMetadata(url)} onChange={(e) => setUrl(e.target.value)} placeholder="https://example.com" className="w-full p-4 bg-white/50 border border-black/5 rounded-xl outline-none text-slate-900 font-bold" />
                 {linkMetadata && <div className="p-4 bg-white/60 rounded-2xl border border-black/5 flex gap-4">{linkMetadata.image && <img src={linkMetadata.image} className="h-16 w-16 rounded-lg object-cover" alt="" />}<div className="flex-1"><p className="text-sm font-bold text-slate-900">{linkMetadata.title}</p></div></div>}
               </div>
             )}
@@ -384,7 +381,7 @@ const PostEditor: React.FC<PostEditorProps> = ({ onClose, onSubmit, authorName, 
               <div className="space-y-4">
                 <div className="aspect-video bg-black rounded-2xl overflow-hidden relative shadow-inner">
                   <video ref={videoRef} autoPlay muted playsInline className={`w-full h-full object-cover ${!isRecording && !videoBase64 ? 'hidden' : ''}`} />
-                  {videoBase64 && !isRecording && <video ref={previewVideoRef} src={videoBase64} onLoadedMetadata={(e) => setVideoDuration(e.currentTarget.duration)} className="w-full h-full object-cover absolute inset-0" />}
+                  {videoBase64 && !isRecording && <video ref={previewVideoRef} src={videoBase64} className="w-full h-full object-cover absolute inset-0" />}
                 </div>
                 <div className="flex justify-center gap-4">
                   {!isRecording ? <button onClick={startRecording} className="px-8 py-3 bg-red-600 text-white rounded-full font-bold">Record</button> : <button onClick={stopRecording} className="px-8 py-3 bg-slate-800 text-white rounded-full font-bold">Stop</button>}
@@ -394,7 +391,7 @@ const PostEditor: React.FC<PostEditorProps> = ({ onClose, onSubmit, authorName, 
 
             {(type !== 'title') && (
               <div className="pt-2">
-                <label className="block text-xs font-black text-slate-400 uppercase tracking-widest mb-2">Caption / Description (Optional)</label>
+                <label className="block text-xs font-black text-slate-400 uppercase tracking-widest mb-2">Caption (Optional)</label>
                 <input type="text" value={caption} onChange={(e) => setCaption(e.target.value)} placeholder="Add some context..." className="w-full px-4 py-3 bg-white/50 border border-black/5 rounded-xl outline-none text-sm" />
               </div>
             )}
@@ -403,7 +400,7 @@ const PostEditor: React.FC<PostEditorProps> = ({ onClose, onSubmit, authorName, 
               <label className="block text-xs font-black text-slate-400 uppercase tracking-widest mb-3">Card Color</label>
               <div className="flex gap-3 overflow-x-auto pb-2">
                 {WALL_COLORS.map(color => (
-                  <button key={color} onClick={() => setSelectedColor(color)} style={{ backgroundColor: color }} className={`h-10 w-10 rounded-full border-2 transition-all ${selectedColor === color ? 'border-cyan-600 scale-110' : 'border-black/10'}`} />
+                  <button key={color} onClick={() => setSelectedColor(color)} style={{ backgroundColor: color }} className={`h-10 w-10 rounded-full border-2 transition-all shrink-0 ${selectedColor === color ? 'border-cyan-600 scale-110 shadow-lg' : 'border-black/10'}`} />
                 ))}
               </div>
             </div>
@@ -414,7 +411,7 @@ const PostEditor: React.FC<PostEditorProps> = ({ onClose, onSubmit, authorName, 
 
         <div className="p-6 border-t border-black/5 bg-white/50 flex justify-end">
           <button onClick={handleSubmit} disabled={isCheckingSafety} className="px-8 py-3 bg-cyan-600 text-white rounded-xl font-bold shadow-lg hover:bg-cyan-700 disabled:opacity-50">
-            {isCheckingSafety ? <Loader2 className="animate-spin" size={18} /> : 'Submit'}
+            {isCheckingSafety ? <Loader2 className="animate-spin" size={18} /> : 'Post to Wall'}
           </button>
         </div>
       </div>

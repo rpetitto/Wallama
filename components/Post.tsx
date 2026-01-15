@@ -1,7 +1,7 @@
 
 import React, { useState, useRef, useEffect, useMemo } from 'react';
 import { Post as PostType } from '../types';
-import { Trash2, GripHorizontal, ExternalLink, Clock, User, Quote, Pencil, HardDrive, Lock, MessageCirclePlus, Sparkles } from 'lucide-react';
+import { Trash2, GripHorizontal, ExternalLink, Clock, User, Quote, Pencil, HardDrive, Lock, MessageCirclePlus, Sparkles, Plus } from 'lucide-react';
 import { marked } from 'marked';
 
 interface PostProps {
@@ -10,8 +10,8 @@ interface PostProps {
   onEdit?: (id: string) => void;
   onMove: (id: string, x: number, y: number) => void;
   onMoveEnd?: (id: string, x: number, y: number) => void;
-  onAddDetail?: (parentId: string) => void; // Support timeline attachments
-  children?: React.ReactNode; // Nested posts for timeline
+  onAddDetail?: (parentId: string) => void; 
+  children?: React.ReactNode; 
   isOwner: boolean;
   snapToGrid?: boolean;
   isWallAnonymous?: boolean;
@@ -51,7 +51,7 @@ const Post: React.FC<PostProps> = ({
 
   const renderedMarkdown = useMemo(() => {
     if (post.type !== 'title' && (post.type as string) !== 'text') return null;
-    return { __html: marked.parse(post.content, { breaks: true, gfm: true }) };
+    return { __html: marked.parse(post.content || '', { breaks: true, gfm: true }) };
   }, [post.content, post.type]);
 
   useEffect(() => {
@@ -212,8 +212,8 @@ const Post: React.FC<PostProps> = ({
   const containerClass = `post-container p-4 w-full rounded-2xl shadow-lg border border-black/5 transition-all duration-75 ${!isHexColor ? post.color : ''} group select-none ${isDragging ? 'shadow-2xl z-[9999] scale-[1.02] cursor-grabbing' : (canDrag ? 'cursor-grab' : 'cursor-default')} hover:shadow-2xl`;
 
   return (
-    <div className={`flex flex-col items-center gap-4 ${isTimelineMilestone ? 'pointer-events-auto' : ''}`} style={wrapperStyle}>
-      {isTimelineMilestone && <div className="h-10 w-1.5 bg-white/50 shadow-sm rounded-full mb-[-12px]" />}
+    <div className={`flex flex-col items-center gap-2 ${isTimelineMilestone ? 'pointer-events-auto' : ''}`} style={wrapperStyle}>
+      {isTimelineMilestone && <div className="h-10 w-1.5 bg-white/50 shadow-sm rounded-full mb-[-8px]" />}
       <div className={containerClass} style={containerStyle} onMouseDown={handleMouseDown}>
         <div className="flex items-center justify-between mb-3">
           <div className="flex items-center gap-2">
@@ -228,11 +228,6 @@ const Post: React.FC<PostProps> = ({
           </div>
           <div className="flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
             {isWallFrozen && <Lock size={14} className="text-slate-400 mr-2" />}
-            {!isWallFrozen && onAddDetail && (
-              <button onClick={(e) => { e.stopPropagation(); onAddDetail(post.id); }} title="Add Detail" className="p-1.5 text-slate-500 hover:text-indigo-600 hover:bg-indigo-50 rounded-lg transition-colors">
-                <MessageCirclePlus size={14} />
-              </button>
-            )}
             {isOwner && onEdit && !isWallFrozen && (
               <button onClick={(e) => { e.stopPropagation(); onEdit(post.id); }} className="p-1.5 text-slate-500 hover:text-cyan-600 hover:bg-cyan-50 rounded-lg transition-colors">
                 <Pencil size={14} />
@@ -267,7 +262,19 @@ const Post: React.FC<PostProps> = ({
           </div>
         </div>
       </div>
-      {children && <div className="flex flex-col items-center gap-4 w-full">{children}</div>}
+      
+      {/* Tiny FAB for adding details in timeline mode */}
+      {!isWallFrozen && onAddDetail && isTimelineMilestone && (
+        <button 
+          onClick={(e) => { e.stopPropagation(); onAddDetail(post.id); }}
+          className="mt-2 h-10 w-10 bg-cyan-600 text-white rounded-full shadow-lg flex items-center justify-center hover:scale-110 active:scale-95 transition-all animate-in zoom-in-50 duration-200 border-2 border-white/50"
+          title="Add Detail to Milestone"
+        >
+          <Plus size={20} />
+        </button>
+      )}
+
+      {children && <div className="flex flex-col items-center gap-4 w-full mt-4">{children}</div>}
     </div>
   );
 };

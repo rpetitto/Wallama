@@ -55,7 +55,6 @@ const WallView: React.FC<WallViewProps> = ({
   const [courses, setCourses] = useState<ClassroomCourse[]>([]);
   const [selectedCourses, setSelectedCourses] = useState<Set<string>>(new Set());
   const [isSharingToClassroom, setIsSharingToClassroom] = useState(false);
-  const [shareSuccess, setShareSuccess] = useState(false);
 
   const [driveFiles, setDriveFiles] = useState<any[]>([]);
   const [driveToken, setDriveToken] = useState<string | null>(sessionStorage.getItem('google_drive_token'));
@@ -69,7 +68,6 @@ const WallView: React.FC<WallViewProps> = ({
   
   const zoomRef = useRef(zoom);
   const panRef = useRef(pan);
-  const startZoomRef = useRef<number>(1); 
 
   useEffect(() => { zoomRef.current = zoom; }, [zoom]);
   useEffect(() => { panRef.current = pan; }, [pan]);
@@ -77,8 +75,6 @@ const WallView: React.FC<WallViewProps> = ({
   const optimisticPosts = useRef<Map<string, PostType>>(new Map());
   const optimisticTimers = useRef<Map<string, ReturnType<typeof setTimeout>>>(new Map());
   const lastInteractionTime = useRef<number>(0);
-  const lastTouchDistance = useRef<number | null>(null);
-  const initialZoom = useRef<number>(1);
 
   const isCanvasMode = wall?.type === 'freeform' || wall?.type === 'timeline';
   const isInteractionBlocked = showEditor || showSettings || showShareOverlay || showClassroomModal || showDeleteConfirm;
@@ -269,37 +265,6 @@ const WallView: React.FC<WallViewProps> = ({
     return () => { el.removeEventListener('wheel', handleWheelNative); };
   }, [isInteractionBlocked, wall?.type, isCanvasMode]); 
 
-  const handleTouchStart = (e: React.TouchEvent) => {
-    if (isInteractionBlocked || !isCanvasMode) return;
-    if (e.touches.length === 1 && !(e.target as HTMLElement).closest('.post-container, .modal-overlay, header, .fixed')) {
-      isPanning.current = true;
-      lastMousePos.current = { x: e.touches[0].clientX, y: e.touches[0].clientY };
-    } else if (e.touches.length === 2) {
-      lastTouchDistance.current = Math.hypot(e.touches[0].clientX - e.touches[1].clientX, e.touches[0].clientY - e.touches[1].clientY);
-      initialZoom.current = zoom;
-    }
-  };
-
-  const handleTouchMove = (e: React.TouchEvent) => {
-    if (isInteractionBlocked || !isCanvasMode) return;
-    if (e.touches.length > 1) e.preventDefault();
-    if (e.touches.length === 1 && isPanning.current) {
-      const dx = e.touches[0].clientX - lastMousePos.current.x;
-      const dy = e.touches[0].clientY - lastMousePos.current.y;
-      setPan(prev => ({ x: prev.x + dx, y: prev.y + dy }));
-      lastMousePos.current = { x: e.touches[0].clientX, y: e.touches[0].clientY };
-    } else if (e.touches.length === 2 && lastTouchDistance.current) {
-      const dist = Math.hypot(e.touches[0].clientX - e.touches[1].clientX, e.touches[0].clientY - e.touches[1].clientY);
-      const centerX = (e.touches[0].clientX + e.touches[1].clientX) / 2;
-      const centerY = (e.touches[0].clientY + e.touches[1].clientY) / 2;
-      const scaleFactor = dist / lastTouchDistance.current;
-      const nextZoom = Math.min(Math.max(initialZoom.current * scaleFactor, 0.05), 5);
-      performZoomAtPoint(nextZoom, centerX, centerY);
-    }
-  };
-
-  const handleTouchEnd = () => { isPanning.current = false; lastTouchDistance.current = null; };
-
   const findSmartSlot = (posts: PostType[]) => {
     if ((wall?.type as string) === 'timeline') {
        const milestones = posts.filter(p => !p.parentId);
@@ -322,30 +287,40 @@ const WallView: React.FC<WallViewProps> = ({
       if (!targetPost) return prev;
 
       if ((prev.type as string) === 'timeline' && !targetPost.parentId) {
-        const finalY = TIMELINE_AXIS_Y;
+        // Find index of slot the user is currently hovering over
         const newSlotIdx = Math.max(0, Math.round(x / MIN_MILESTONE_SPACING));
         
-        // Temporarily move the target
-        const otherMilestones = updatedPosts.filter(p => !p.parentId && p.id !== id).sort((a, b) => a.x - b.x);
+        // Milestones excluding the one being dragged, sorted by current x
+        const milestones = updatedPosts.filter(p => !p.parentId && p.id !== id).sort((a, b) => a.x - b.x);
         
-        // Re-calculate order
-        const reordered = [...otherMilestones];
-        reordered.splice(newSlotIdx, 0, { ...targetPost, x: newSlotIdx * MIN_MILESTONE_SPACING, y: finalY });
+        // Determine current position index of all milestones to handle swaps
+        const finalMilestones = [...milestones];
+        const clampedSlotIdx = Math.min(newSlotIdx, finalMilestones.length);
         
-        // Assign discrete positions to all milestones
-        reordered.forEach((m, idx) => {
-           m.x = idx * MIN_MILESTONE_SPACING;
-           m.y = finalY;
-           optimisticPosts.current.set(m.id, m);
-           scheduleOptimisticCleanup(m.id);
+        // Insert dragging post at new proposed index
+        finalMilestones.splice(clampedSlotIdx, 0, { ...targetPost, x: x }); 
+
+        // Update x of everyone ELSE to their discrete positions
+        finalMilestones.forEach((m, idx) => {
+          if (m.id !== id) {
+             const discreteX = idx * MIN_MILESTONE_SPACING;
+             m.x = discreteX;
+             m.y = TIMELINE_AXIS_Y;
+             optimisticPosts.current.set(m.id, m);
+             scheduleOptimisticCleanup(m.id);
+          }
         });
 
-        // Map back to main list
+        // Map back to global posts list
         updatedPosts = updatedPosts.map(p => {
-           if (p.parentId) return p;
-           const updated = reordered.find(m => m.id === p.id);
-           return updated || p;
+           const match = finalMilestones.find(fm => fm.id === p.id);
+           return match ? match : p;
         });
+        
+        // Also update dragging post state locally for visual feedback
+        const dragMatch = updatedPosts.find(p => p.id === id);
+        if (dragMatch) dragMatch.x = x; 
+
       } else {
         const finalY = ((prev.type as string) === 'timeline' && !targetPost.parentId) ? TIMELINE_AXIS_Y : y;
         updatedPosts = updatedPosts.map(p => p.id === id ? { ...p, x, y: finalY } : p);
@@ -362,12 +337,23 @@ const WallView: React.FC<WallViewProps> = ({
     lastInteractionTime.current = Date.now();
     
     if ((wall?.type as string) === 'timeline') {
+       // Snap the dragging post to its final discrete slot
+       const finalSlotIdx = Math.max(0, Math.round(x / MIN_MILESTONE_SPACING));
+       const finalX = finalSlotIdx * MIN_MILESTONE_SPACING;
+       
+       setWall(prev => {
+          if (!prev) return prev;
+          return { ...prev, posts: prev.posts.map(p => p.id === id ? { ...p, x: finalX } : p) };
+       });
+
        const milestones = wall.posts.filter(p => !p.parentId);
-       const promises = milestones.map(m => onMovePost(m.id, m.x, m.y));
+       const promises = milestones.map(m => {
+          const mX = m.id === id ? finalX : m.x;
+          return onMovePost(m.id, mX, TIMELINE_AXIS_Y);
+       });
        await Promise.all(promises);
     } else {
-       const finalY = ((wall?.type as string) === 'timeline' && !wall?.posts.find(p => p.id === id)?.parentId) ? TIMELINE_AXIS_Y : y;
-       await onMovePost(id, x, finalY);
+       await onMovePost(id, x, y);
     }
   };
 
@@ -429,7 +415,7 @@ const WallView: React.FC<WallViewProps> = ({
         const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
         const response = await ai.models.generateContent({
             model: 'gemini-3-flash-preview',
-            contents: `Find a direct URL to a high-quality, professional, widescreen image for a digital wall background related to "${bgSearch}". The URL MUST end in .jpg or .png and be publicly accessible. Return ONLY the URL string.`,
+            contents: `Find a direct URL to a high-quality professional wallpaper for "${bgSearch}". Return ONLY the URL string.`,
             config: { tools: [{ googleSearch: {} }] }
         });
         const url = response.text.trim().replace(/`/g, '');
@@ -465,8 +451,8 @@ const WallView: React.FC<WallViewProps> = ({
     const courseIds = Array.from(selectedCourses);
     for (const cid of courseIds) { await classroomService.shareWallToCourse(token, cid, wall); }
     setIsSharingToClassroom(false);
-    setShareSuccess(true);
-    setTimeout(() => { setShareSuccess(false); setShowClassroomModal(false); setSelectedCourses(new Set()); }, 2000);
+    setShowClassroomModal(false); 
+    setSelectedCourses(new Set());
   };
 
   const handleDeleteWall = async () => {
@@ -503,9 +489,6 @@ const WallView: React.FC<WallViewProps> = ({
       onMouseMove={handleCanvasMouseMove}
       onMouseUp={handleCanvasMouseUp}
       onMouseLeave={handleCanvasMouseUp}
-      onTouchStart={handleTouchStart}
-      onTouchMove={handleTouchMove}
-      onTouchEnd={handleTouchEnd}
     >
       <header className="sticky top-0 z-[100] bg-white/80 backdrop-blur-xl border-b border-slate-200/50 px-6 py-4 flex items-center justify-between">
         <div className="flex items-center gap-4">
@@ -523,7 +506,6 @@ const WallView: React.FC<WallViewProps> = ({
                         {wall.type === 'timeline' && <History size={8} />}
                         {wall.type}
                       </span>
-                      {wall.isFrozen && <div className="px-2 py-0.5 bg-indigo-600/10 backdrop-blur-md rounded-full flex items-center gap-1 border border-indigo-200/50"><Lock size={10} className="text-indigo-600"/><span className="text-[10px] font-black text-indigo-600 uppercase tracking-wider">Frozen</span></div>}
                     </div>
                 </div>
                 <p className="text-[10px] text-slate-500 font-bold uppercase tracking-widest">Code: {wall.joinCode}</p>
@@ -544,7 +526,8 @@ const WallView: React.FC<WallViewProps> = ({
            >
              <div className="relative w-[10000px] h-[10000px]">
                {wall.type === 'timeline' && (
-                  <div className="absolute top-[242px] left-[-10000px] right-[-10000px] w-[30000px] h-1 bg-white/40 shadow-sm z-0 pointer-events-none" />
+                  /* Extended axis line for infinite feel */
+                  <div className="absolute top-[242px] left-[-30000px] w-[60000px] h-1 bg-white/40 shadow-sm z-0 pointer-events-none" />
                )}
 
                {wall.type === 'timeline' ? (
@@ -742,7 +725,6 @@ const WallView: React.FC<WallViewProps> = ({
                                     {isBgSearching ? <Loader2 className="animate-spin" size={14} /> : 'Search'}
                                 </button>
                             </div>
-                            <p className="text-[10px] text-slate-500 font-bold uppercase tracking-widest">Finding the perfect high-quality background...</p>
                             {isImageBackground && !settingsForm.background?.includes('data:image') && (
                                 <img src={settingsForm.background} className="h-12 w-20 object-cover rounded-lg mx-auto border" alt="Search Result Preview" />
                             )}
