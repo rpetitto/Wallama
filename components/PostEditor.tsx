@@ -1,7 +1,7 @@
 
 import React, { useState, useRef, useEffect } from 'react';
 import { PostType, Post } from '../types';
-import { X, Image as ImageIcon, Link as LinkIcon, Gift, Video, Sparkles, Send, Camera, StopCircle, Upload, Loader2, Type, Search, Check, Palette, MessageSquare, ShieldAlert, Save, HardDrive, Bold, Italic, Underline, Code, List, ListOrdered, Scissors, LayoutGrid, Link as LinkIconSmall } from 'lucide-react';
+import { X, Image as ImageIcon, Link as LinkIcon, Gift, Video, Sparkles, Send, Camera, StopCircle, Upload, Loader2, Type, Search, Check, Palette, MessageSquare, ShieldAlert, Save, HardDrive, Bold, Italic, Underline, Code, List, ListOrdered, Quote, LayoutGrid, Link as LinkIconSmall } from 'lucide-react';
 import { refinePostContent, checkContentSafety } from '../services/geminiService';
 import { WALL_COLORS, WALL_GRADIENTS } from '../constants';
 import { GoogleGenAI } from "@google/genai";
@@ -51,6 +51,7 @@ const PostEditor: React.FC<PostEditorProps> = ({ onClose, onSubmit, authorName, 
   const previewVideoRef = useRef<HTMLVideoElement>(null);
   const mediaRecorderRef = useRef<MediaRecorder | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
+  const textareaRef = useRef<HTMLTextAreaElement>(null);
   const driveTokenClient = useRef<any>(null);
 
   useEffect(() => {
@@ -60,7 +61,7 @@ const PostEditor: React.FC<PostEditorProps> = ({ onClose, onSubmit, authorName, 
       setSelectedColor(initialPost.color || WALL_COLORS[0]);
       setCaption(initialPost.metadata?.caption || '');
       if (pType === 'title') {
-        setTitleText(initialPost.metadata?.title || '');
+        setTitleText(initialPost.title || '');
         setContent(initialPost.content || '');
         setHeaderImage(initialPost.metadata?.image || null);
       } else if (pType === 'video') {
@@ -135,6 +136,19 @@ const PostEditor: React.FC<PostEditorProps> = ({ onClose, onSubmit, authorName, 
     }
   };
 
+  const insertFormat = (before: string, after: string = '') => {
+    if (!textareaRef.current) return;
+    const start = textareaRef.current.selectionStart;
+    const end = textareaRef.current.selectionEnd;
+    const selected = content.substring(start, end);
+    const newText = content.substring(0, start) + before + selected + after + content.substring(end);
+    setContent(newText);
+    setTimeout(() => {
+        textareaRef.current?.focus();
+        textareaRef.current?.setSelectionRange(start + before.length, end + before.length);
+    }, 0);
+  };
+
   const searchGifs = async (query: string) => {
     setIsSearchingGifs(true);
     try {
@@ -197,6 +211,7 @@ const PostEditor: React.FC<PostEditorProps> = ({ onClose, onSubmit, authorName, 
   const stopRecording = () => { mediaRecorderRef.current?.stop(); setIsRecording(false); };
 
   const handleSubmit = async () => {
+    let submissionTitle = '';
     let submissionContent = content;
     let submissionMetadata: any = { caption };
     setSafetyError(null);
@@ -210,16 +225,16 @@ const PostEditor: React.FC<PostEditorProps> = ({ onClose, onSubmit, authorName, 
       submissionContent = url;
       submissionMetadata = { ...submissionMetadata, ...linkMetadata };
     } else if (type === 'title') {
-      submissionContent = content; // Body
+      submissionTitle = titleText;
+      submissionContent = content; 
       submissionMetadata.image = headerImage;
-      submissionMetadata.title = titleText; // Header
     }
 
     if (!submissionContent && type !== 'title') return;
-    if (type === 'title' && !titleText && !content) return;
+    if (type === 'title' && !submissionTitle && !submissionContent) return;
 
     setIsCheckingSafety(true);
-    const safetyResult = await checkContentSafety(titleText + ' ' + submissionContent + ' ' + caption, (type === 'image' && url.startsWith('data:')) ? url : undefined);
+    const safetyResult = await checkContentSafety(submissionTitle + ' ' + submissionContent + ' ' + caption, (type === 'image' && url.startsWith('data:')) ? url : undefined);
     if (!safetyResult.isSafe) {
       setIsCheckingSafety(false);
       setSafetyError(safetyResult.reason || "Inappropriate content.");
@@ -229,6 +244,7 @@ const PostEditor: React.FC<PostEditorProps> = ({ onClose, onSubmit, authorName, 
 
     onSubmit({
       type,
+      title: submissionTitle,
       content: submissionContent,
       metadata: submissionMetadata,
       color: selectedColor,
@@ -347,14 +363,32 @@ const PostEditor: React.FC<PostEditorProps> = ({ onClose, onSubmit, authorName, 
                    <input type="text" value={titleText} onChange={e => setTitleText(e.target.value)} placeholder="Main Heading..." className="w-full p-4 bg-white/50 border border-black/5 rounded-xl outline-none text-lg font-black text-slate-900" />
                 </div>
                 <div className="relative">
-                  <label className="block text-xs font-black text-slate-400 uppercase tracking-widest mb-2 ml-1">Body (Supports Markdown)</label>
-                  <textarea value={content} onChange={(e) => setContent(e.target.value)} placeholder="Enter details or thoughts..." className="w-full h-32 p-4 bg-white/50 border border-black/5 rounded-2xl focus:ring-4 focus:ring-cyan-500/20 focus:border-cyan-500 outline-none resize-none text-base font-medium text-slate-900" />
+                  <label className="block text-xs font-black text-slate-400 uppercase tracking-widest mb-2 ml-1">Body Text</label>
+                  
+                  {/* Markdown Toolbar */}
+                  <div className="flex flex-wrap gap-1 p-1 bg-black/5 rounded-t-xl border-x border-t border-black/5">
+                    <button onClick={() => insertFormat('**', '**')} className="p-2 hover:bg-white rounded-lg text-slate-600" title="Bold"><Bold size={16} /></button>
+                    <button onClick={() => insertFormat('_', '_')} className="p-2 hover:bg-white rounded-lg text-slate-600" title="Italic"><Italic size={16} /></button>
+                    <button onClick={() => insertFormat('<u>', '</u>')} className="p-2 hover:bg-white rounded-lg text-slate-600" title="Underline"><Underline size={16} /></button>
+                    <div className="w-px h-6 bg-black/10 mx-1 self-center" />
+                    <button onClick={() => insertFormat('- ')} className="p-2 hover:bg-white rounded-lg text-slate-600" title="Bullet List"><List size={16} /></button>
+                    <button onClick={() => insertFormat('1. ')} className="p-2 hover:bg-white rounded-lg text-slate-600" title="Numbered List"><ListOrdered size={16} /></button>
+                    <button onClick={() => insertFormat('> ')} className="p-2 hover:bg-white rounded-lg text-slate-600" title="Quote"><Quote size={16} /></button>
+                    <button onClick={() => insertFormat('`', '`')} className="p-2 hover:bg-white rounded-lg text-slate-600" title="Code"><Code size={16} /></button>
+                  </div>
+
+                  <textarea ref={textareaRef} value={content} onChange={(e) => setContent(e.target.value)} placeholder="Enter details or thoughts..." className="w-full h-32 p-4 bg-white/50 border border-black/5 rounded-b-2xl focus:ring-4 focus:ring-cyan-500/20 focus:border-cyan-500 outline-none resize-none text-base font-medium text-slate-900" />
                   <button onClick={handleRefine} disabled={!content || isRefining} className="absolute bottom-4 right-4 flex items-center gap-2 px-3 py-1.5 bg-cyan-600 text-white rounded-full text-xs font-bold shadow-md transition-all"><Sparkles size={14} /> {isRefining ? '...' : 'AI Refine'}</button>
                 </div>
               </div>
             )}
 
-            {type === 'image' && <ImagePickerUI />}
+            {type === 'image' && (
+              <div className="space-y-2">
+                 <label className="text-xs font-black text-slate-400 uppercase tracking-widest ml-1">Select Image Content</label>
+                 <ImagePickerUI />
+              </div>
+            )}
 
             {type === 'link' && (
               <div className="space-y-4">

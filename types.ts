@@ -15,7 +15,8 @@ export type PostType = 'title' | 'text' | 'image' | 'link' | 'gif' | 'video' | '
 export interface Post {
   id: string;
   type: PostType;
-  content: string;
+  title?: string; // Mapped to new SQL column
+  content: string; // Mapped to Body
   authorName: string;
   authorId: string;
   authorAvatar?: string;

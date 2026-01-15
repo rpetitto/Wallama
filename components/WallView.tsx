@@ -287,39 +287,27 @@ const WallView: React.FC<WallViewProps> = ({
       if (!targetPost) return prev;
 
       if ((prev.type as string) === 'timeline' && !targetPost.parentId) {
-        // Find index of slot the user is currently hovering over
-        const newSlotIdx = Math.max(0, Math.round(x / MIN_MILESTONE_SPACING));
+        // Handle milestone visual shuffling
+        const proposedIdx = Math.max(0, Math.round(x / MIN_MILESTONE_SPACING));
+        const others = updatedPosts.filter(p => !p.parentId && p.id !== id).sort((a, b) => a.x - b.x);
         
-        // Milestones excluding the one being dragged, sorted by current x
-        const milestones = updatedPosts.filter(p => !p.parentId && p.id !== id).sort((a, b) => a.x - b.x);
-        
-        // Determine current position index of all milestones to handle swaps
-        const finalMilestones = [...milestones];
-        const clampedSlotIdx = Math.min(newSlotIdx, finalMilestones.length);
-        
-        // Insert dragging post at new proposed index
-        finalMilestones.splice(clampedSlotIdx, 0, { ...targetPost, x: x }); 
+        const reordered = [...others];
+        reordered.splice(proposedIdx, 0, { ...targetPost, x }); 
 
-        // Update x of everyone ELSE to their discrete positions
-        finalMilestones.forEach((m, idx) => {
-          if (m.id !== id) {
-             const discreteX = idx * MIN_MILESTONE_SPACING;
-             m.x = discreteX;
-             m.y = TIMELINE_AXIS_Y;
-             optimisticPosts.current.set(m.id, m);
-             scheduleOptimisticCleanup(m.id);
-          }
+        const finalMilestones = reordered.map((m, idx) => {
+            const discreteX = idx * MIN_MILESTONE_SPACING;
+            if (m.id === id) return { ...m, x }; // Fluid dragging
+            
+            const updatedOther = { ...m, x: discreteX, y: TIMELINE_AXIS_Y };
+            optimisticPosts.current.set(updatedOther.id, updatedOther);
+            scheduleOptimisticCleanup(updatedOther.id);
+            return updatedOther;
         });
 
-        // Map back to global posts list
         updatedPosts = updatedPosts.map(p => {
-           const match = finalMilestones.find(fm => fm.id === p.id);
-           return match ? match : p;
+           const fm = finalMilestones.find(m => m.id === p.id);
+           return fm ? fm : p;
         });
-        
-        // Also update dragging post state locally for visual feedback
-        const dragMatch = updatedPosts.find(p => p.id === id);
-        if (dragMatch) dragMatch.x = x; 
 
       } else {
         const finalY = ((prev.type as string) === 'timeline' && !targetPost.parentId) ? TIMELINE_AXIS_Y : y;
@@ -337,7 +325,6 @@ const WallView: React.FC<WallViewProps> = ({
     lastInteractionTime.current = Date.now();
     
     if ((wall?.type as string) === 'timeline') {
-       // Snap the dragging post to its final discrete slot
        const finalSlotIdx = Math.max(0, Math.round(x / MIN_MILESTONE_SPACING));
        const finalX = finalSlotIdx * MIN_MILESTONE_SPACING;
        
@@ -369,7 +356,7 @@ const WallView: React.FC<WallViewProps> = ({
     const slot = isCanvasMode ? findSmartSlot(wall?.posts || []) : { x: 0, y: 0 };
     const tempId = 'temp_' + Date.now();
     const optimisticPost: PostType = {
-      id: tempId, type: data.type || 'title', content: data.content || '',
+      id: tempId, type: data.type || 'title', title: data.title, content: data.content || '',
       authorName, authorId: currentUserId, createdAt: Date.now(), x: slot.x, y: slot.y,
       zIndex: Math.max(0, ...(wall?.posts.map(p => p.zIndex) || [])) + 1,
       color: data.color || 'bg-white', metadata: data.metadata,
@@ -526,7 +513,7 @@ const WallView: React.FC<WallViewProps> = ({
            >
              <div className="relative w-[10000px] h-[10000px]">
                {wall.type === 'timeline' && (
-                  /* Extended axis line for infinite feel */
+                  /* Extended axis line spanning 60,000px for infinite effect */
                   <div className="absolute top-[242px] left-[-30000px] w-[60000px] h-1 bg-white/40 shadow-sm z-0 pointer-events-none" />
                )}
 

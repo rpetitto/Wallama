@@ -7,9 +7,6 @@ const supabaseKey = 'sb_publishable_jL7BE1EAKR8MYM5tnHKVrQ_jeewBbXN';
 
 const supabase = createClient(supabaseUrl, supabaseKey);
 
-/**
- * Data Mappers with safety checks
- */
 const mapWallFromDB = (dbWall: any): Wall => {
   if (!dbWall) return null as any;
   return {
@@ -34,10 +31,11 @@ const mapPostFromDB = (dbPost: any): Post => {
   return {
     id: dbPost.id,
     type: dbPost.type || 'text',
+    title: dbPost.title || '', // Map new column
     content: dbPost.content || '',
     authorName: dbPost.author_name || 'Anonymous',
     authorId: dbPost.author_id || '',
-    // author_avatar removed as it is not in the user's provided schema
+    authorAvatar: dbPost.author_avatar || '',
     createdAt: dbPost.created_at ? new Date(dbPost.created_at).getTime() : Date.now(),
     x: Number(dbPost.x) || 0,
     y: Number(dbPost.y) || 0,
@@ -67,8 +65,6 @@ export const databaseService = {
 
   async getStudentWalls(userId: string): Promise<Wall[]> {
     try {
-      // Note: If you don't have wall_members table yet, this might fail.
-      // For now, we assume user ran the SQL.
       const { data: memberData, error: memberError } = await supabase
         .from('wall_members')
         .select('wall_id, last_accessed_at')
@@ -158,10 +154,7 @@ export const databaseService = {
         }])
         .select().single();
 
-      if (error) {
-          console.error("Supabase Wall Creation Error:", error.message, error.details);
-          throw error;
-      }
+      if (error) throw error;
       return mapWallFromDB({ ...data, posts: [] });
     } catch (err) {
       console.error("Application SQL createWall error:", err);
@@ -172,26 +165,25 @@ export const databaseService = {
   async addPost(wallId: string, post: Partial<Post>): Promise<Post | null> {
     try {
       let nextZ = 1;
-      try {
-        const { data: maxZData, error: zError } = await supabase
-          .from('posts')
-          .select('z_index')
-          .eq('wall_id', wallId)
-          .order('z_index', { ascending: false })
-          .limit(1);
-        
-        if (!zError && maxZData && maxZData.length > 0) {
-          nextZ = maxZData[0].z_index + 1;
-        }
-      } catch (e) {}
+      const { data: maxZData } = await supabase
+        .from('posts')
+        .select('z_index')
+        .eq('wall_id', wallId)
+        .order('z_index', { ascending: false })
+        .limit(1);
+      
+      if (maxZData && maxZData.length > 0) {
+        nextZ = maxZData[0].z_index + 1;
+      }
 
       const fullPayload = {
         wall_id: wallId,
         type: post.type || 'text',
+        title: post.title || null, // Handle new column
         content: post.content || '',
         author_name: post.authorName || 'Anonymous',
         author_id: post.authorId || 'anon',
-        // author_avatar is not in provided schema, so we do not send it
+        author_avatar: post.authorAvatar || '',
         x: Math.round(post.x || 100),
         y: Math.round(post.y || 100),
         z_index: Math.round(nextZ),
@@ -205,12 +197,8 @@ export const databaseService = {
         .insert([fullPayload])
         .select().single();
 
-      if (error) {
-        console.error("Supabase Post Insertion Error:", error.message, error.details);
-        throw error;
-      }
+      if (error) throw error;
       return mapPostFromDB(data);
-
     } catch (err) {
       console.error("SQL addPost failed:", err);
       return null;
@@ -220,6 +208,7 @@ export const databaseService = {
   async updatePostContent(postId: string, post: Partial<Post>): Promise<Post | null> {
     try {
       const updates: any = {};
+      if (post.title !== undefined) updates.title = post.title; // Handle new column
       if (post.content !== undefined) updates.content = post.content;
       if (post.type !== undefined) updates.type = post.type;
       if (post.color !== undefined) updates.color = post.color;
@@ -266,7 +255,6 @@ export const databaseService = {
         const { error } = await supabase.from('walls').delete().eq('id', wallId);
         return !error;
     } catch (err) {
-        console.error("SQL deleteWall failed:", err);
         return false;
     }
   },

@@ -112,8 +112,8 @@ const Post: React.FC<PostProps> = ({
                    { !post.metadata.image.includes('from-') && <img src={post.metadata.image} className="w-full h-full object-cover" alt="Header" /> }
                 </div>
              )}
-             {post.metadata?.title && (
-                <h3 className="text-xl font-black text-slate-900 leading-tight tracking-tight mb-2">{post.metadata.title}</h3>
+             {post.title && (
+                <h3 className="text-xl font-black text-slate-900 leading-tight tracking-tight mb-2">{post.title}</h3>
              )}
              <div 
                className="markdown-content text-slate-700 font-medium" 
