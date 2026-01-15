@@ -208,11 +208,12 @@ export const databaseService = {
   async updatePostContent(postId: string, post: Partial<Post>): Promise<Post | null> {
     try {
       const updates: any = {};
-      if (post.title !== undefined) updates.title = post.title; // Handle new column
+      if (post.title !== undefined) updates.title = post.title;
       if (post.content !== undefined) updates.content = post.content;
       if (post.type !== undefined) updates.type = post.type;
       if (post.color !== undefined) updates.color = post.color;
       if (post.metadata !== undefined) updates.metadata = post.metadata;
+      if (post.parentId !== undefined) updates.parent_id = post.parentId;
 
       const { data, error } = await supabase
         .from('posts')

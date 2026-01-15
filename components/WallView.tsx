@@ -68,6 +68,8 @@ const WallView: React.FC<WallViewProps> = ({
   const hasInitialZoomed = useRef(false);
   const bgInputRef = useRef<HTMLInputElement>(null);
   
+  const [draggingPostId, setDraggingPostId] = useState<string | null>(null);
+
   const zoomRef = useRef(zoom);
   const panRef = useRef(pan);
 
@@ -129,7 +131,7 @@ const WallView: React.FC<WallViewProps> = ({
   };
 
   const syncWall = useCallback(async () => {
-    if (Date.now() - lastInteractionTime.current < 500) return;
+    if (Date.now() - lastInteractionTime.current < 500 || draggingPostId) return;
     try {
       const remoteWall = await databaseService.getWallById(wallId);
       if (remoteWall) {
@@ -164,7 +166,7 @@ const WallView: React.FC<WallViewProps> = ({
         setError(null);
       } else { setError("Wall not found."); }
     } catch (err: any) { console.error("Sync error:", err); } finally { setIsSyncing(false); }
-  }, [wallId]);
+  }, [wallId, draggingPostId]);
 
   const zoomFit = useCallback(() => {
     if (!wall || wall.posts.length === 0 || !isCanvasMode) { setZoom(1); setPan({ x: 0, y: 0 }); return; }
@@ -289,7 +291,11 @@ const WallView: React.FC<WallViewProps> = ({
     return { x: maxX + 50, y: 100 };
   };
 
-  const handlePostMove = (id: string, x: number, y: number) => {
+  const handlePostDragStart = (id: string) => {
+      setDraggingPostId(id);
+  };
+
+  const handlePostMove = (id: string, x: number, y: number, clientX?: number, clientY?: number) => {
     if (wall?.isFrozen || isInteractionBlocked || !isCanvasMode) return;
     lastInteractionTime.current = Date.now();
     setWall(prev => {
@@ -300,7 +306,7 @@ const WallView: React.FC<WallViewProps> = ({
       if (!targetPost) return prev;
 
       if ((prev.type as string) === 'timeline' && !targetPost.parentId) {
-        // Timeline shuffling logic...
+        // Timeline logic...
         const proposedIdx = Math.max(0, Math.round(x / MIN_MILESTONE_SPACING));
         const others = updatedPosts.filter(p => !p.parentId && p.id !== id).sort((a, b) => a.x - b.x);
         const reordered = [...others];
@@ -318,7 +324,37 @@ const WallView: React.FC<WallViewProps> = ({
            return fm ? fm : p;
         });
       } else if ((prev.type as string) === 'kanban') {
-          updatedPosts = updatedPosts.map(p => p.id === id ? { ...p, x, y } : p);
+          // Kanban Logic
+          if (targetPost.parentId && clientX !== undefined) {
+              // It's a Card. Check for column switching using absolute clientX.
+              // Calculate Canvas X.
+              const el = containerRef.current;
+              if (el) {
+                  const rect = el.getBoundingClientRect();
+                  const canvasX = (clientX - rect.left - pan.x) / zoom;
+                  
+                  // Identify nearest column
+                  const columns = updatedPosts.filter(p => !p.parentId).sort((a, b) => a.x - b.x);
+                  let targetColumn = columns[0];
+                  
+                  // Simple binning based on X
+                  const colIndex = Math.max(0, Math.min(columns.length - 1, Math.floor((canvasX - KANBAN_START_X) / KANBAN_COLUMN_WIDTH)));
+                  if (colIndex >= 0 && colIndex < columns.length) {
+                      targetColumn = columns[colIndex];
+                  }
+
+                  if (targetColumn && targetColumn.id !== targetPost.parentId) {
+                      // Switch Parent Live!
+                      updatedPosts = updatedPosts.map(p => p.id === id ? { ...p, parentId: targetColumn.id, y } : p);
+                  } else {
+                      // Same Parent, just update Y
+                      updatedPosts = updatedPosts.map(p => p.id === id ? { ...p, y } : p);
+                  }
+              }
+          } else {
+              // Just update X/Y (Columns or simple move)
+              updatedPosts = updatedPosts.map(p => p.id === id ? { ...p, x, y } : p);
+          }
           optimisticPosts.current.set(id, { ...targetPost, x, y });
       } else {
         const finalY = ((prev.type as string) === 'timeline' && !targetPost.parentId) ? TIMELINE_AXIS_Y : y;
@@ -334,6 +370,7 @@ const WallView: React.FC<WallViewProps> = ({
   const handlePostMoveEnd = async (id: string, x: number, y: number) => {
     if (wall?.isFrozen || isInteractionBlocked || !isCanvasMode) return;
     lastInteractionTime.current = Date.now();
+    setDraggingPostId(null);
     
     if ((wall?.type as string) === 'timeline') {
        const finalSlotIdx = Math.max(0, Math.round(x / MIN_MILESTONE_SPACING));
@@ -354,7 +391,7 @@ const WallView: React.FC<WallViewProps> = ({
        if (!movedPost) return;
 
        if (!movedPost.parentId) {
-           // Move Column
+           // Column Drop
            const colWidth = KANBAN_COLUMN_WIDTH;
            const proposedIdx = Math.max(0, Math.round((x - KANBAN_START_X) / colWidth));
            const columns = wall.posts.filter(p => !p.parentId && p.id !== id).sort((a, b) => a.x - b.x);
@@ -363,7 +400,7 @@ const WallView: React.FC<WallViewProps> = ({
            const updates = columns.map((col, idx) => ({ 
                id: col.id, 
                x: KANBAN_START_X + (idx * colWidth),
-               y: 50 // Fixed Y for columns
+               y: 50 
            }));
 
            setWall(prev => prev ? ({ ...prev, posts: prev.posts.map(p => {
@@ -373,41 +410,11 @@ const WallView: React.FC<WallViewProps> = ({
 
            await Promise.all(updates.map(u => onMovePost(u.id, u.x, u.y)));
        } else {
-           // Move Card
-           const columns = wall.posts.filter(p => !p.parentId).sort((a, b) => a.x - b.x);
-           let targetColumn = columns[0];
-           
-           // Find column based on X
-           for (const col of columns) {
-               if (x > col.x && x < col.x + KANBAN_COLUMN_WIDTH) {
-                   targetColumn = col;
-                   break;
-               }
-           }
-           // Edge case: if dragged past the last column
-           if (x > columns[columns.length-1].x + KANBAN_COLUMN_WIDTH) targetColumn = columns[columns.length-1];
-
-           if (targetColumn) {
-               const newParentId = targetColumn.id;
-               
-               if (newParentId !== movedPost.parentId) {
-                   await onEditPost(id, { parentId: newParentId });
-               }
-
-               // The y coming from dragEnd is relative to the column top if we used proper drag logic in Post.tsx,
-               // or it's the absolute position relative to original offset.
-               // Given Post.tsx changes: y is now effectively the `offsetTop` relative to the column.
-               // So saving `y` is correct for vertical sorting.
-               await onMovePost(id, 0, y); 
-               
-               setWall(prev => {
-                   if (!prev) return prev;
-                   return {
-                       ...prev,
-                       posts: prev.posts.map(p => p.id === id ? { ...p, parentId: newParentId, y } : p)
-                   };
-               });
-           }
+           // Card Drop (Logic handled live in handlePostMove, just save final state)
+           // We need to persist parentId changes if they happened live.
+           // wall state is already updated. Just push to DB.
+           await onEditPost(id, { parentId: movedPost.parentId });
+           await onMovePost(id, 0, y); 
        }
     } else {
        await onMovePost(id, x, y);
@@ -630,18 +637,35 @@ const WallView: React.FC<WallViewProps> = ({
                             snapToGrid={false} isWallAnonymous={wall.isAnonymous} isWallFrozen={wall.isFrozen}
                             isKanbanColumn={true}
                         >
-                            {getAttachments(column.id).map(card => (
-                                <div key={card.id} className="w-full relative">
-                                    <Post
-                                        post={{...card, x: 0, y: 0}} zoom={zoom} // Pos controlled by parent render logic but maintained for visual consistency
-                                        onDelete={(id) => { setWall(prev => prev ? ({ ...prev, posts: prev.posts.filter(p => p.id !== id) }) : null); onDeletePost(id); }}
-                                        onEdit={handleEditClick} onMove={handlePostMove} onMoveEnd={handlePostMoveEnd}
-                                        isOwner={card.authorId === currentUserId || isTeacher}
-                                        snapToGrid={false} isWallAnonymous={wall.isAnonymous} isWallFrozen={wall.isFrozen}
-                                        isKanbanCard={true}
-                                    />
-                                </div>
-                            ))}
+                            {getAttachments(column.id).map(card => {
+                                if (card.id === draggingPostId) {
+                                    return (
+                                        <React.Fragment key={card.id}>
+                                            <div className="w-full h-32 border-2 border-dashed border-cyan-300 bg-cyan-50/50 rounded-2xl mb-3" />
+                                            <Post
+                                                post={{...card, x: 0, y: 0}} zoom={zoom} 
+                                                onDelete={(id) => { setWall(prev => prev ? ({ ...prev, posts: prev.posts.filter(p => p.id !== id) }) : null); onDeletePost(id); }}
+                                                onEdit={handleEditClick} onMove={handlePostMove} onMoveEnd={handlePostMoveEnd} onDragStart={handlePostDragStart}
+                                                isOwner={card.authorId === currentUserId || isTeacher}
+                                                snapToGrid={false} isWallAnonymous={wall.isAnonymous} isWallFrozen={wall.isFrozen}
+                                                isKanbanCard={true}
+                                            />
+                                        </React.Fragment>
+                                    );
+                                }
+                                return (
+                                    <div key={card.id} className="w-full relative">
+                                        <Post
+                                            post={{...card, x: 0, y: 0}} zoom={zoom} 
+                                            onDelete={(id) => { setWall(prev => prev ? ({ ...prev, posts: prev.posts.filter(p => p.id !== id) }) : null); onDeletePost(id); }}
+                                            onEdit={handleEditClick} onMove={handlePostMove} onMoveEnd={handlePostMoveEnd} onDragStart={handlePostDragStart}
+                                            isOwner={card.authorId === currentUserId || isTeacher}
+                                            snapToGrid={false} isWallAnonymous={wall.isAnonymous} isWallFrozen={wall.isFrozen}
+                                            isKanbanCard={true}
+                                        />
+                                    </div>
+                                );
+                            })}
                         </Post>
                    ))
                ) : (

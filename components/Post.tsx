@@ -8,8 +8,9 @@ interface PostProps {
   post: PostType;
   onDelete: (id: string) => void;
   onEdit?: (id: string) => void;
-  onMove: (id: string, x: number, y: number) => void;
+  onMove: (id: string, x: number, y: number, clientX?: number, clientY?: number) => void;
   onMoveEnd?: (id: string, x: number, y: number) => void;
+  onDragStart?: (id: string) => void;
   onAddDetail?: (parentId: string) => void; 
   children?: React.ReactNode; 
   isOwner: boolean;
@@ -40,18 +41,20 @@ const getRelativeTime = (timestamp: number): string => {
 };
 
 const Post: React.FC<PostProps> = ({ 
-  post, onDelete, onEdit, onMove, onMoveEnd, onAddDetail, children, 
+  post, onDelete, onEdit, onMove, onMoveEnd, onDragStart, onAddDetail, children, 
   isOwner, snapToGrid, isWallAnonymous, isWallFrozen, isTimelineMilestone, isKanbanColumn, isKanbanCard, zoom 
 }) => {
   const [isDragging, setIsDragging] = useState(false);
-  const [dragDelta, setDragDelta] = useState({ x: 0, y: 0 }); // Local visual delta for smooth dragging
+  const [dragDelta, setDragDelta] = useState({ x: 0, y: 0 }); 
   const [relativeTime, setRelativeTime] = useState(getRelativeTime(post.createdAt));
+  const [fixedWidth, setFixedWidth] = useState<number | undefined>(undefined);
   
-  const dragStartPos = useRef({ x: 0, y: 0 });
-  const postStartPos = useRef({ x: post.x, y: post.y });
+  const dragStartPos = useRef({ x: 0, y: 0 }); // Mouse start
+  const postStartPos = useRef({ x: post.x, y: post.y }); // Logic start
+  const visualStartPos = useRef({ x: 0, y: 0 }); // Screen start for fixed positioning
   const currentPos = useRef({ x: post.x, y: post.y });
   const containerRef = useRef<HTMLDivElement>(null);
-  const lastOnMoveCall = useRef<number>(0); // For throttling parent updates
+  const lastOnMoveCall = useRef<number>(0); 
 
   const canDrag = isOwner && !isWallFrozen && (post.x !== 0 || post.y !== 0 || isTimelineMilestone || isKanbanColumn || isKanbanCard);
 
@@ -72,13 +75,22 @@ const Post: React.FC<PostProps> = ({
     if (!canDrag) return;
     if ((e.target as HTMLElement).closest('button, video, a, input, [role="button"]')) return;
 
+    if (onDragStart) onDragStart(post.id);
+
     let startX = post.x;
     let startY = post.y;
 
-    // For Kanban cards, capture offset relative to column to simulate natural drag start
-    if (isKanbanCard && containerRef.current) {
-        startX = 0; 
-        startY = containerRef.current.offsetTop;
+    // Capture screen position for fixed rendering
+    if (containerRef.current) {
+        const rect = containerRef.current.getBoundingClientRect();
+        visualStartPos.current = { x: rect.left, y: rect.top };
+        setFixedWidth(rect.width);
+        
+        if (isKanbanCard) {
+             // For Kanban logic, startY is relative to column
+             startX = 0;
+             startY = containerRef.current.offsetTop;
+        }
     }
 
     setIsDragging(true);
@@ -96,10 +108,16 @@ const Post: React.FC<PostProps> = ({
         const dx = (e.clientX - dragStartPos.current.x) / zoom;
         const dy = (e.clientY - dragStartPos.current.y) / zoom;
         
-        // 1. Update Visuals Immediately (60fps)
-        setDragDelta({ x: dx, y: dy });
+        // 1. Visual Delta (Screen pixels if fixed, scaled pixels if absolute)
+        // If fixed, we want screen pixels. If absolute, we want scaled.
+        // For Kanban Cards we use Fixed.
+        if (isKanbanCard && isDragging) {
+             setDragDelta({ x: e.clientX - dragStartPos.current.x, y: e.clientY - dragStartPos.current.y });
+        } else {
+             setDragDelta({ x: dx, y: dy });
+        }
 
-        // 2. Calculate logical position for data model
+        // 2. Logical Position
         let nextX = postStartPos.current.x + dx;
         let nextY = isTimelineMilestone ? postStartPos.current.y : postStartPos.current.y + dy;
         
@@ -110,10 +128,10 @@ const Post: React.FC<PostProps> = ({
 
         currentPos.current = { x: nextX, y: nextY };
 
-        // 3. Throttle updates to parent to prevent layout thrashing (e.g., every 50ms)
+        // 3. Throttle updates
         const now = Date.now();
         if (now - lastOnMoveCall.current > 50) {
-            onMove(post.id, nextX, nextY);
+            onMove(post.id, nextX, nextY, e.clientX, e.clientY);
             lastOnMoveCall.current = now;
         }
     });
@@ -122,10 +140,10 @@ const Post: React.FC<PostProps> = ({
   const handleMouseUp = () => {
     setIsDragging(false);
     setDragDelta({ x: 0, y: 0 });
+    setFixedWidth(undefined);
     document.removeEventListener('mousemove', handleMouseMove);
     document.removeEventListener('mouseup', handleMouseUp);
     
-    // Ensure final position is synced
     if (onMoveEnd) {
       onMoveEnd(post.id, currentPos.current.x, currentPos.current.y);
     }
@@ -233,32 +251,28 @@ const Post: React.FC<PostProps> = ({
   const isHexColor = post.color?.startsWith('#');
   const isWrapperControlled = isTimelineMilestone || isKanbanColumn || isKanbanCard;
   
-  // When dragging, we force absolute positioning based on the *initial* start position + local delta.
-  // This bypasses the React prop cycle for smooth 60fps movement.
+  // Logic:
+  // - If dragging Kanban Card: Position FIXED to break out of columns. Use Visual Start + Delta.
+  // - Else: Position ABSOLUTE relative to parent container.
+  
+  const isFixedDrag = isKanbanCard && isDragging;
   const isAbsolute = (isTimelineMilestone || isKanbanColumn) || (!isWrapperControlled && (post.x !== 0 || post.y !== 0)) || (isKanbanCard && isDragging);
 
   const containerStyle: React.CSSProperties = {
-    // If dragging, we anchor to the start position and use transform for movement.
-    // If not dragging, we use the prop position.
-    left: isDragging ? postStartPos.current.x : ((isAbsolute && !isWrapperControlled) ? post.x : undefined),
-    top: isDragging ? postStartPos.current.y : ((isAbsolute && !isWrapperControlled) ? post.y : undefined),
+    left: isFixedDrag ? visualStartPos.current.x : (isDragging ? postStartPos.current.x : ((isAbsolute && !isWrapperControlled) ? post.x : undefined)),
+    top: isFixedDrag ? visualStartPos.current.y : (isDragging ? postStartPos.current.y : ((isAbsolute && !isWrapperControlled) ? post.y : undefined)),
     
-    // Add delta to transform. Include tilt and scale for feedback.
     transform: isDragging ? `translate(${dragDelta.x}px, ${dragDelta.y}px) rotate(2deg) scale(1.05)` : undefined,
     zIndex: isDragging ? 99999 : post.zIndex,
     
     backgroundColor: isHexColor ? post.color : undefined,
-    position: (isAbsolute && (!isWrapperControlled || (isKanbanCard && isDragging))) ? 'absolute' : 'relative',
-    width: (isAbsolute || isWrapperControlled) ? '300px' : '100%',
+    position: isFixedDrag ? 'fixed' : ((isAbsolute && (!isWrapperControlled || (isKanbanCard && isDragging))) ? 'absolute' : 'relative'),
+    width: fixedWidth ? `${fixedWidth}px` : ((isAbsolute || isWrapperControlled) ? '300px' : '100%'),
     
-    // Disable transition during drag for instant response
     transition: isDragging ? 'none' : 'all 0.2s cubic-bezier(0.2, 0, 0, 1)' 
   };
 
-  // Adjust padding for Kanban columns
   const paddingClass = isKanbanColumn ? 'py-2 px-3' : 'p-4';
-  
-  // Add shadow and cursor styles
   const shadowClass = isDragging ? 'shadow-2xl ring-4 ring-black/5' : 'shadow-lg hover:shadow-xl';
   const cursorClass = isDragging ? 'cursor-grabbing' : (canDrag ? 'cursor-grab' : 'cursor-default');
   
