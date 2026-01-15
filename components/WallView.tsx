@@ -57,7 +57,6 @@ const WallView: React.FC<WallViewProps> = ({
   const [isSharingToClassroom, setIsSharingToClassroom] = useState(false);
   const [shareSuccess, setShareSuccess] = useState(false);
 
-  // Drive state for settings
   const [driveFiles, setDriveFiles] = useState<any[]>([]);
   const [driveToken, setDriveToken] = useState<string | null>(sessionStorage.getItem('google_drive_token'));
   const driveTokenClient = useRef<any>(null);
@@ -100,7 +99,6 @@ const WallView: React.FC<WallViewProps> = ({
     }
   }, []);
 
-  // Fetch drive files if token exists but no files loaded
   useEffect(() => {
     if (driveToken && driveFiles.length === 0 && showSettings && bgPickerTab === 'drive') {
       fetchDriveFiles(driveToken);
@@ -117,7 +115,6 @@ const WallView: React.FC<WallViewProps> = ({
             const data = await res.json();
             setDriveFiles(data.files || []);
         } else if (res.status === 401) {
-            // Token expired
             sessionStorage.removeItem('google_drive_token');
             setDriveToken(null);
         }
@@ -146,8 +143,6 @@ const WallView: React.FC<WallViewProps> = ({
         });
         optimisticPosts.current.forEach((op, id) => { if (!remoteIds.has(id)) combinedPosts.push(op); });
         
-        // Use an explicit cast to string before comparison to ensure 'timeline' is allowed,
-        // bypasses narrowing issues where TypeScript incorrectly thinks 'timeline' has no overlap.
         const currentType = remoteWall.type as string;
         if (currentType === 'timeline') {
            combinedPosts.sort((a, b) => {
@@ -270,16 +265,8 @@ const WallView: React.FC<WallViewProps> = ({
         panRef.current = nextPan;
       }
     };
-    const handleGestureStartNative = (e: any) => { if (isInteractionBlocked) return; e.preventDefault(); startZoomRef.current = zoomRef.current; };
-    const handleGestureChangeNative = (e: any) => { if (isInteractionBlocked) return; e.preventDefault(); const nextZoom = Math.min(Math.max(startZoomRef.current * e.scale, 0.05), 5); performZoomAtPoint(nextZoom, e.clientX, e.clientY); };
     el.addEventListener('wheel', handleWheelNative, { passive: false });
-    el.addEventListener('gesturestart', handleGestureStartNative as any);
-    el.addEventListener('gesturechange', handleGestureChangeNative as any);
-    return () => { 
-      el.removeEventListener('wheel', handleWheelNative); 
-      el.removeEventListener('gesturestart', handleGestureStartNative as any);
-      el.removeEventListener('gesturechange', handleGestureChangeNative as any);
-    };
+    return () => { el.removeEventListener('wheel', handleWheelNative); };
   }, [isInteractionBlocked, wall?.type, isCanvasMode]); 
 
   const handleTouchStart = (e: React.TouchEvent) => {
@@ -314,18 +301,14 @@ const WallView: React.FC<WallViewProps> = ({
   const handleTouchEnd = () => { isPanning.current = false; lastTouchDistance.current = null; };
 
   const findSmartSlot = (posts: PostType[]) => {
-    // Cast type to string for comparison to bypass narrowing issues.
     if ((wall?.type as string) === 'timeline') {
        const milestones = posts.filter(p => !p.parentId);
-       if (milestones.length === 0) return { x: 100, y: TIMELINE_AXIS_Y };
-       const maxX = Math.max(...milestones.map(p => p.x));
-       return { x: maxX + 350, y: TIMELINE_AXIS_Y };
+       const slotCount = milestones.length;
+       return { x: slotCount * MIN_MILESTONE_SPACING, y: TIMELINE_AXIS_Y };
     }
     if (posts.length === 0) return { x: 100, y: 100 };
-    const minX = Math.min(...posts.map(p => p.x)), maxX = Math.max(...posts.map(p => p.x + 300));
-    const minY = Math.min(...posts.map(p => p.y)), maxY = Math.max(...posts.map(p => p.y + 250));
-    if ((maxX - minX) >= (maxY - minY)) return { x: minX, y: maxY + 50 };
-    return { x: maxX + 50, y: minY };
+    const maxX = Math.max(...posts.map(p => p.x + 300));
+    return { x: maxX + 50, y: 100 };
   };
 
   const handlePostMove = (id: string, x: number, y: number) => {
@@ -335,46 +318,40 @@ const WallView: React.FC<WallViewProps> = ({
       if (!prev) return prev;
       
       let updatedPosts = [...prev.posts];
-      const maxZ = Math.max(0, ...updatedPosts.map(p => p.zIndex));
       const targetPost = updatedPosts.find(p => p.id === id);
       if (!targetPost) return prev;
 
-      // Cast type to string for comparison to bypass narrowing issues.
       if ((prev.type as string) === 'timeline' && !targetPost.parentId) {
-        // Enforce X positioning and push milestones to the right
         const finalY = TIMELINE_AXIS_Y;
+        const newSlotIdx = Math.max(0, Math.round(x / MIN_MILESTONE_SPACING));
         
-        // 1. Update the dragging post's tentative position
-        updatedPosts = updatedPosts.map(p => p.id === id ? { ...p, x, y: finalY, zIndex: maxZ + 1 } : p);
+        // Temporarily move the target
+        const otherMilestones = updatedPosts.filter(p => !p.parentId && p.id !== id).sort((a, b) => a.x - b.x);
         
-        // 2. Identify all milestones
-        const milestones = updatedPosts.filter(p => !p.parentId).sort((a, b) => a.x - b.x);
+        // Re-calculate order
+        const reordered = [...otherMilestones];
+        reordered.splice(newSlotIdx, 0, { ...targetPost, x: newSlotIdx * MIN_MILESTONE_SPACING, y: finalY });
         
-        // 3. Ripple push logic to prevent overlaps (only pushing right)
-        for (let i = 1; i < milestones.length; i++) {
-            if (milestones[i].x < milestones[i-1].x + MIN_MILESTONE_SPACING) {
-                const shiftedX = milestones[i-1].x + MIN_MILESTONE_SPACING;
-                milestones[i].x = shiftedX;
-                // Reflect back into main list
-                const milestoneId = milestones[i].id;
-                updatedPosts = updatedPosts.map(p => p.id === milestoneId ? { ...p, x: shiftedX } : p);
-            }
-        }
-      } else {
-        // Standard freeform movement
-        // Cast type to string for comparison
-        const finalY = ((prev.type as string) === 'timeline' && !targetPost.parentId) ? TIMELINE_AXIS_Y : y;
-        updatedPosts = updatedPosts.map(p => p.id === id ? { ...p, x, y: finalY, zIndex: maxZ + 1 } : p);
-      }
+        // Assign discrete positions to all milestones
+        reordered.forEach((m, idx) => {
+           m.x = idx * MIN_MILESTONE_SPACING;
+           m.y = finalY;
+           optimisticPosts.current.set(m.id, m);
+           scheduleOptimisticCleanup(m.id);
+        });
 
-      // Update optimistic tracking for all moved posts in this frame
-      updatedPosts.forEach(p => {
-         const original = prev.posts.find(op => op.id === p.id);
-         if (original && (original.x !== p.x || original.y !== p.y)) {
-            optimisticPosts.current.set(p.id, p);
-            scheduleOptimisticCleanup(p.id);
-         }
-      });
+        // Map back to main list
+        updatedPosts = updatedPosts.map(p => {
+           if (p.parentId) return p;
+           const updated = reordered.find(m => m.id === p.id);
+           return updated || p;
+        });
+      } else {
+        const finalY = ((prev.type as string) === 'timeline' && !targetPost.parentId) ? TIMELINE_AXIS_Y : y;
+        updatedPosts = updatedPosts.map(p => p.id === id ? { ...p, x, y: finalY } : p);
+        optimisticPosts.current.set(id, { ...targetPost, x, y: finalY });
+        scheduleOptimisticCleanup(id);
+      }
 
       return { ...prev, posts: updatedPosts };
     });
@@ -384,14 +361,11 @@ const WallView: React.FC<WallViewProps> = ({
     if (wall?.isFrozen || isInteractionBlocked || !isCanvasMode) return;
     lastInteractionTime.current = Date.now();
     
-    // In timeline mode, multiple posts might have shifted. We need to persist all changes.
-    // Cast type to string for comparison to bypass narrowing issues.
     if ((wall?.type as string) === 'timeline') {
        const milestones = wall.posts.filter(p => !p.parentId);
        const promises = milestones.map(m => onMovePost(m.id, m.x, m.y));
        await Promise.all(promises);
     } else {
-       // Cast type to string for comparison
        const finalY = ((wall?.type as string) === 'timeline' && !wall?.posts.find(p => p.id === id)?.parentId) ? TIMELINE_AXIS_Y : y;
        await onMovePost(id, x, finalY);
     }
@@ -409,7 +383,7 @@ const WallView: React.FC<WallViewProps> = ({
     const slot = isCanvasMode ? findSmartSlot(wall?.posts || []) : { x: 0, y: 0 };
     const tempId = 'temp_' + Date.now();
     const optimisticPost: PostType = {
-      id: tempId, type: data.type || 'text', content: data.content || '',
+      id: tempId, type: data.type || 'title', content: data.content || '',
       authorName, authorId: currentUserId, createdAt: Date.now(), x: slot.x, y: slot.y,
       zIndex: Math.max(0, ...(wall?.posts.map(p => p.zIndex) || [])) + 1,
       color: data.color || 'bg-white', metadata: data.metadata,
@@ -570,7 +544,7 @@ const WallView: React.FC<WallViewProps> = ({
            >
              <div className="relative w-[10000px] h-[10000px]">
                {wall.type === 'timeline' && (
-                  <div className="absolute top-[242px] left-0 right-0 h-1 bg-white/40 shadow-sm z-0 pointer-events-none" />
+                  <div className="absolute top-[242px] left-[-10000px] right-[-10000px] w-[30000px] h-1 bg-white/40 shadow-sm z-0 pointer-events-none" />
                )}
 
                {wall.type === 'timeline' ? (
@@ -623,15 +597,6 @@ const WallView: React.FC<WallViewProps> = ({
                 />
               </div>
             ))}
-            {wall.posts.length === 0 && (
-               <div className="py-20 text-center bg-white/30 backdrop-blur-md rounded-[2.5rem] border border-white/20">
-                  <div className="h-20 w-20 bg-white/50 rounded-full flex items-center justify-center mx-auto mb-4">
-                     <Plus className="text-slate-400" size={40} />
-                  </div>
-                  <h4 className="text-slate-800 font-bold text-xl">This wall is empty</h4>
-                  <p className="text-slate-600">Be the first to add something!</p>
-               </div>
-            )}
           </div>
         )}
       </main>

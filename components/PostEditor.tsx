@@ -21,6 +21,7 @@ const GOOGLE_CLIENT_ID = "6888240288-5v0p6nsoi64q1puv1vpvk1njd398ra8b.apps.googl
 
 const PostEditor: React.FC<PostEditorProps> = ({ onClose, onSubmit, authorName, initialPost, parentId }) => {
   const [type, setType] = useState<PostType>('title');
+  const [titleText, setTitleText] = useState('');
   const [content, setContent] = useState('');
   const [caption, setCaption] = useState('');
   const [url, setUrl] = useState('');
@@ -36,7 +37,6 @@ const PostEditor: React.FC<PostEditorProps> = ({ onClose, onSubmit, authorName, 
   const [isCheckingSafety, setIsCheckingSafety] = useState(false);
   const [safetyError, setSafetyError] = useState<string | null>(null);
   
-  // Image/Header Picker State
   const [imagePickerTab, setImagePickerTab] = useState<'presets' | 'upload' | 'drive' | 'url' | 'search'>('presets');
   const [imageSearch, setImageSearch] = useState('');
   const [imageUrlInput, setImageUrlInput] = useState('');
@@ -45,7 +45,6 @@ const PostEditor: React.FC<PostEditorProps> = ({ onClose, onSubmit, authorName, 
   const [isDriveLoading, setIsDriveLoading] = useState(false);
   const [driveToken, setDriveToken] = useState<string | null>(sessionStorage.getItem('google_drive_token'));
 
-  // Giphy State
   const [gifSearch, setGifSearch] = useState('');
   const [gifs, setGifs] = useState<any[]>([]);
   const [isSearchingGifs, setIsSearchingGifs] = useState(false);
@@ -64,6 +63,7 @@ const PostEditor: React.FC<PostEditorProps> = ({ onClose, onSubmit, authorName, 
       setSelectedColor(initialPost.color || WALL_COLORS[0]);
       setCaption(initialPost.metadata?.caption || '');
       if (pType === 'title') {
+        setTitleText(initialPost.metadata?.title || '');
         setContent(initialPost.content);
         setHeaderImage(initialPost.metadata?.image || null);
       } else if (pType === 'video') {
@@ -116,7 +116,7 @@ const PostEditor: React.FC<PostEditorProps> = ({ onClose, onSubmit, authorName, 
         const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
         const response = await ai.models.generateContent({
             model: 'gemini-3-flash-preview',
-            contents: `Find a direct, high-quality, publicly accessible image URL for: "${imageSearch}". Return ONLY the raw URL string.`,
+            contents: `Find a direct high-quality image URL for: "${imageSearch}". Return ONLY the raw URL string.`,
             config: { tools: [{ googleSearch: {} }] }
         });
         const foundUrl = response.text.trim().replace(/`/g, '');
@@ -216,13 +216,14 @@ const PostEditor: React.FC<PostEditorProps> = ({ onClose, onSubmit, authorName, 
     } else if (type === 'title') {
       submissionContent = content;
       submissionMetadata.image = headerImage;
+      submissionMetadata.title = titleText;
     }
 
     if (!submissionContent && type !== 'title') return;
-    if (type === 'title' && !content) return;
+    if (type === 'title' && !titleText && !content) return;
 
     setIsCheckingSafety(true);
-    const safetyResult = await checkContentSafety(submissionContent + ' ' + caption, (type === 'image' && url.startsWith('data:')) ? url : undefined);
+    const safetyResult = await checkContentSafety(titleText + ' ' + submissionContent + ' ' + caption, (type === 'image' && url.startsWith('data:')) ? url : undefined);
     if (!safetyResult.isSafe) {
       setIsCheckingSafety(false);
       setSafetyError(safetyResult.reason || "Inappropriate content.");
@@ -258,59 +259,54 @@ const PostEditor: React.FC<PostEditorProps> = ({ onClose, onSubmit, authorName, 
         {imagePickerTab === 'presets' && (
           <div className="grid grid-cols-4 gap-2">
             {WALL_GRADIENTS.map(g => (
-              <button key={g} onClick={() => { if(type==='title') setHeaderImage(g); else setUrl(g); }} className={`h-12 rounded-lg bg-gradient-to-br ${g} border border-black/10`} />
+              <button key={g} onClick={() => { if(type==='title') setHeaderImage(g); else setUrl(g); }} className={`h-12 rounded-lg bg-gradient-to-br ${g}`} />
             ))}
           </div>
         )}
         {imagePickerTab === 'upload' && (
-          <div className="flex flex-col items-center justify-center py-4 cursor-pointer hover:bg-black/5 rounded-xl transition-colors" onClick={() => fileInputRef.current?.click()}>
+          <div className="flex flex-col items-center justify-center py-4 cursor-pointer" onClick={() => fileInputRef.current?.click()}>
             <Upload className="text-slate-400 mb-2" size={32} />
-            <p className="text-xs font-bold text-slate-500">Click to upload file</p>
+            <p className="text-xs font-bold text-slate-500">Click to upload</p>
             <input ref={fileInputRef} type="file" accept="image/*" className="hidden" onChange={handleImageUpload} />
           </div>
         )}
         {imagePickerTab === 'drive' && (
           <div className="space-y-3">
             {!driveToken ? (
-              <button onClick={() => driveTokenClient.current?.requestAccessToken()} className="w-full py-3 bg-slate-800 text-white rounded-xl text-xs font-bold">Connect Google Drive</button>
+              <button onClick={() => driveTokenClient.current?.requestAccessToken()} className="w-full py-3 bg-slate-800 text-white rounded-xl text-xs font-bold">Connect Drive</button>
             ) : (
-              <div className="grid grid-cols-4 gap-2 h-32 overflow-y-auto custom-scrollbar pr-1">
+              <div className="grid grid-cols-4 gap-2 h-32 overflow-y-auto custom-scrollbar">
                 {driveFiles.map(file => (
-                  <button key={file.id} onClick={() => { 
-                    const directUrl = file.thumbnailLink?.replace(/=s\d+$/, '=s0');
-                    if(type==='title') setHeaderImage(directUrl || file.thumbnailLink); 
-                    else setUrl(directUrl || file.thumbnailLink); 
-                  }} className="relative block aspect-square w-full rounded-lg overflow-hidden border border-black/10">
-                    <img src={file.thumbnailLink} className="absolute inset-0 w-full h-full object-cover" alt="" referrerPolicy="no-referrer" />
+                  <button key={file.id} onClick={() => { if(type==='title') setHeaderImage(file.thumbnailLink); else setUrl(file.webViewLink); }} className="aspect-square bg-white rounded-lg overflow-hidden border">
+                    <img src={file.thumbnailLink} className="w-full h-full object-cover" alt="" referrerPolicy="no-referrer" />
                   </button>
                 ))}
-                {driveFiles.length === 0 && <p className="col-span-full text-center text-[10px] text-slate-400 py-10 font-bold uppercase">No images found</p>}
               </div>
             )}
           </div>
         )}
         {imagePickerTab === 'url' && (
           <div className="flex gap-2">
-            <input type="text" placeholder="https://image-url.com/img.jpg" className="flex-1 px-3 py-2 bg-white border border-black/10 rounded-lg text-xs outline-none focus:ring-2 focus:ring-cyan-500/20" value={imageUrlInput} onChange={e => setImageUrlInput(e.target.value)} />
-            <button onClick={() => { if(type==='title') setHeaderImage(imageUrlInput); else setUrl(imageUrlInput); setImageUrlInput(''); }} className="px-4 py-2 bg-slate-800 text-white rounded-lg text-xs font-bold">Apply</button>
+            <input type="text" placeholder="https://image-url.com/img.jpg" className="flex-1 px-3 py-2 bg-white border border-black/10 rounded-lg text-xs" value={imageUrlInput} onChange={e => setImageUrlInput(e.target.value)} />
+            <button onClick={() => { if(type==='title') setHeaderImage(imageUrlInput); else setUrl(imageUrlInput); setImageUrlInput(''); }} className="px-3 py-2 bg-slate-800 text-white rounded-lg text-xs font-bold">Apply</button>
           </div>
         )}
         {imagePickerTab === 'search' && (
           <div className="space-y-2">
             <div className="flex gap-2">
-              <input type="text" placeholder="Space, Abstract, Nature..." className="flex-1 px-3 py-2 bg-white border border-black/10 rounded-lg text-xs outline-none focus:ring-2 focus:ring-cyan-500/20" value={imageSearch} onChange={e => setImageSearch(e.target.value)} onKeyDown={e => e.key === 'Enter' && performImageSearch()} />
-              <button onClick={performImageSearch} disabled={isImageSearching} className="px-4 py-2 bg-indigo-600 text-white rounded-lg text-xs font-bold disabled:opacity-50">
+              <input type="text" placeholder="Search images..." className="flex-1 px-3 py-2 bg-white border border-black/10 rounded-lg text-xs" value={imageSearch} onChange={e => setImageSearch(e.target.value)} onKeyDown={e => e.key === 'Enter' && performImageSearch()} />
+              <button onClick={performImageSearch} disabled={isImageSearching} className="px-4 py-2 bg-indigo-600 text-white rounded-lg text-xs font-bold">
                 {isImageSearching ? <Loader2 className="animate-spin" size={14} /> : 'Go'}
               </button>
             </div>
           </div>
         )}
         {(type === 'title' ? headerImage : url) && (
-          <div className="mt-4 flex items-center justify-between p-2 bg-white rounded-xl border border-black/5">
+          <div className="mt-4 flex items-center justify-between">
             <div className={`h-12 w-20 rounded-lg border border-black/10 overflow-hidden ${ (type==='title'?headerImage:url)?.includes('from-') ? 'bg-gradient-to-br '+(type==='title'?headerImage:url) : '' }`}>
                { !(type==='title'?headerImage:url)?.includes('from-') && <img src={type==='title' ? headerImage! : url} className="w-full h-full object-cover" alt="" /> }
             </div>
-            <button onClick={() => { if(type==='title') setHeaderImage(null); else setUrl(''); }} className="px-3 py-1 text-[10px] font-black text-red-500 uppercase tracking-widest hover:bg-red-50 rounded-lg transition-colors">Clear Image</button>
+            <button onClick={() => { if(type==='title') setHeaderImage(null); else setUrl(''); }} className="text-[10px] font-black text-red-500 uppercase tracking-widest">Remove</button>
           </div>
         )}
       </div>
@@ -350,36 +346,35 @@ const PostEditor: React.FC<PostEditorProps> = ({ onClose, onSubmit, authorName, 
                    <label className="text-xs font-black text-slate-400 uppercase tracking-widest ml-1">Header Image (Optional)</label>
                    <ImagePickerUI />
                 </div>
+                <div className="space-y-2">
+                   <label className="text-xs font-black text-slate-400 uppercase tracking-widest ml-1">Header Text (1-Line)</label>
+                   <input type="text" value={titleText} onChange={e => setTitleText(e.target.value)} placeholder="Main Heading..." className="w-full p-4 bg-white/50 border border-black/5 rounded-xl outline-none text-lg font-black text-slate-900" />
+                </div>
                 <div className="relative">
-                  <textarea ref={textareaRef} value={content} onChange={(e) => setContent(e.target.value)} placeholder="Enter a striking title or thought..." className="w-full h-32 p-4 bg-white/50 border border-black/5 rounded-2xl focus:ring-4 focus:ring-cyan-500/20 focus:border-cyan-500 outline-none resize-none text-lg font-bold text-slate-900" />
-                  <button onClick={handleRefine} disabled={!content || isRefining} className="absolute bottom-4 right-4 flex items-center gap-2 px-3 py-1.5 bg-cyan-600 text-white rounded-full text-xs font-bold shadow-md transition-all active:scale-95"><Sparkles size={14} /> {isRefining ? '...' : 'AI Refine'}</button>
+                  <textarea ref={textareaRef} value={content} onChange={(e) => setContent(e.target.value)} placeholder="Enter details or thoughts..." className="w-full h-32 p-4 bg-white/50 border border-black/5 rounded-2xl focus:ring-4 focus:ring-cyan-500/20 focus:border-cyan-500 outline-none resize-none text-base font-medium text-slate-900" />
+                  <button onClick={handleRefine} disabled={!content || isRefining} className="absolute bottom-4 right-4 flex items-center gap-2 px-3 py-1.5 bg-cyan-600 text-white rounded-full text-xs font-bold shadow-md transition-all"><Sparkles size={14} /> {isRefining ? '...' : 'AI Refine'}</button>
                 </div>
               </div>
             )}
 
-            {type === 'image' && (
-              <div className="space-y-2">
-                <label className="text-xs font-black text-slate-400 uppercase tracking-widest ml-1">Image Selection</label>
-                <ImagePickerUI />
-              </div>
-            )}
+            {type === 'image' && <ImagePickerUI />}
 
             {type === 'link' && (
               <div className="space-y-4">
-                <input type="text" value={url} onBlur={() => fetchLinkMetadata(url)} onChange={(e) => setUrl(e.target.value)} placeholder="https://example.com" className="w-full p-4 bg-white/50 border border-black/5 rounded-xl outline-none text-slate-900 font-medium" />
-                {linkMetadata && <div className="p-4 bg-white/60 rounded-2xl border border-black/5 flex gap-4">{linkMetadata.image && <img src={linkMetadata.image} className="h-16 w-16 rounded-lg object-cover border" alt="" />}<div className="flex-1"><p className="text-sm font-bold text-slate-900 line-clamp-2">{linkMetadata.title}</p></div></div>}
+                <input type="text" value={url} onBlur={() => fetchLinkMetadata(url)} onChange={(e) => setUrl(e.target.value)} placeholder="https://example.com" className="w-full p-4 bg-white/50 border border-black/5 rounded-xl outline-none text-slate-900" />
+                {linkMetadata && <div className="p-4 bg-white/60 rounded-2xl border border-black/5 flex gap-4">{linkMetadata.image && <img src={linkMetadata.image} className="h-16 w-16 rounded-lg object-cover" alt="" />}<div className="flex-1"><p className="text-sm font-bold text-slate-900">{linkMetadata.title}</p></div></div>}
               </div>
             )}
 
             {type === 'gif' && (
               <div className="space-y-4">
                 <div className="flex gap-2">
-                  <input type="text" value={gifSearch} onChange={(e) => setGifSearch(e.target.value)} onKeyDown={(e) => e.key === 'Enter' && searchGifs(gifSearch)} placeholder="Search Giphy..." className="flex-1 p-4 bg-white/50 border border-black/5 rounded-xl outline-none font-medium" />
-                  <button onClick={() => searchGifs(gifSearch)} className="px-6 bg-cyan-600 text-white rounded-xl font-bold active:scale-95">Find</button>
+                  <input type="text" value={gifSearch} onChange={(e) => setGifSearch(e.target.value)} onKeyDown={(e) => e.key === 'Enter' && searchGifs(gifSearch)} placeholder="Search Giphy..." className="flex-1 p-4 bg-white/50 border border-black/5 rounded-xl outline-none" />
+                  <button onClick={() => searchGifs(gifSearch)} className="px-6 bg-cyan-600 text-white rounded-xl font-bold">Find</button>
                 </div>
                 <div className="grid grid-cols-3 gap-2 max-h-48 overflow-y-auto p-1 custom-scrollbar">
                   {gifs.map(gif => (
-                    <button key={gif.id} onClick={() => setUrl(gif.images.fixed_height.url)} className={`aspect-square rounded-lg overflow-hidden border-4 transition-all ${url === gif.images.fixed_height.url ? 'border-cyan-600 scale-95' : 'border-transparent'}`}><img src={gif.images.fixed_height.url} className="w-full h-full object-cover" alt="" /></button>
+                    <button key={gif.id} onClick={() => setUrl(gif.images.fixed_height.url)} className={`aspect-square rounded-lg overflow-hidden border-4 transition-all ${url === gif.images.fixed_height.url ? 'border-cyan-600' : 'border-transparent'}`}><img src={gif.images.fixed_height.url} className="w-full h-full object-cover" alt="" /></button>
                   ))}
                 </div>
               </div>
@@ -392,32 +387,34 @@ const PostEditor: React.FC<PostEditorProps> = ({ onClose, onSubmit, authorName, 
                   {videoBase64 && !isRecording && <video ref={previewVideoRef} src={videoBase64} onLoadedMetadata={(e) => setVideoDuration(e.currentTarget.duration)} className="w-full h-full object-cover absolute inset-0" />}
                 </div>
                 <div className="flex justify-center gap-4">
-                  {!isRecording ? <button onClick={startRecording} className="px-8 py-3 bg-red-600 text-white rounded-full font-bold shadow-lg active:scale-95">Start Recording</button> : <button onClick={stopRecording} className="px-8 py-3 bg-slate-800 text-white rounded-full font-bold shadow-lg active:scale-95">Stop</button>}
+                  {!isRecording ? <button onClick={startRecording} className="px-8 py-3 bg-red-600 text-white rounded-full font-bold">Record</button> : <button onClick={stopRecording} className="px-8 py-3 bg-slate-800 text-white rounded-full font-bold">Stop</button>}
                 </div>
               </div>
             )}
 
-            <div className="pt-2">
-              <label className="block text-xs font-black text-slate-400 uppercase tracking-widest mb-2">Caption / Context (Optional)</label>
-              <input type="text" value={caption} onChange={(e) => setCaption(e.target.value)} placeholder="Add some context..." className="w-full px-4 py-3 bg-white/50 border border-black/5 rounded-xl outline-none text-sm font-medium" />
-            </div>
+            {(type !== 'title') && (
+              <div className="pt-2">
+                <label className="block text-xs font-black text-slate-400 uppercase tracking-widest mb-2">Caption / Description (Optional)</label>
+                <input type="text" value={caption} onChange={(e) => setCaption(e.target.value)} placeholder="Add some context..." className="w-full px-4 py-3 bg-white/50 border border-black/5 rounded-xl outline-none text-sm" />
+              </div>
+            )}
 
             <div className="pt-2">
               <label className="block text-xs font-black text-slate-400 uppercase tracking-widest mb-3">Card Color</label>
-              <div className="flex gap-3 overflow-x-auto pb-2 custom-scrollbar">
+              <div className="flex gap-3 overflow-x-auto pb-2">
                 {WALL_COLORS.map(color => (
-                  <button key={color} onClick={() => setSelectedColor(color)} style={{ backgroundColor: color }} className={`h-10 w-10 shrink-0 rounded-full border-2 transition-all ${selectedColor === color ? 'border-cyan-600 scale-110 shadow-lg' : 'border-black/10 hover:border-black/20'}`} />
+                  <button key={color} onClick={() => setSelectedColor(color)} style={{ backgroundColor: color }} className={`h-10 w-10 rounded-full border-2 transition-all ${selectedColor === color ? 'border-cyan-600 scale-110' : 'border-black/10'}`} />
                 ))}
               </div>
             </div>
           </div>
         </div>
         
-        {safetyError && <div className="mx-6 mb-2 p-3 bg-red-50 border border-red-200 rounded-xl text-red-700 text-[10px] font-black uppercase tracking-tight flex gap-2 items-center"><ShieldAlert size={14} /> {safetyError}</div>}
+        {safetyError && <div className="mx-6 mb-2 p-3 bg-red-50 border border-red-200 rounded-xl text-red-700 text-xs font-bold">{safetyError}</div>}
 
         <div className="p-6 border-t border-black/5 bg-white/50 flex justify-end">
-          <button onClick={handleSubmit} disabled={isCheckingSafety} className="px-12 py-3 bg-cyan-600 text-white rounded-xl font-black uppercase tracking-widest text-xs shadow-lg hover:bg-cyan-700 disabled:opacity-50 transition-all active:scale-95 flex items-center gap-2">
-            {isCheckingSafety ? <><Loader2 className="animate-spin" size={16} /> Checking Safety...</> : 'Post to Wall'}
+          <button onClick={handleSubmit} disabled={isCheckingSafety} className="px-8 py-3 bg-cyan-600 text-white rounded-xl font-bold shadow-lg hover:bg-cyan-700 disabled:opacity-50">
+            {isCheckingSafety ? <Loader2 className="animate-spin" size={18} /> : 'Submit'}
           </button>
         </div>
       </div>

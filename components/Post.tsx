@@ -50,8 +50,7 @@ const Post: React.FC<PostProps> = ({
   const canDrag = isOwner && !isWallFrozen && (post.x !== 0 || post.y !== 0 || isTimelineMilestone);
 
   const renderedMarkdown = useMemo(() => {
-    const pType = (post.type as string);
-    if (pType !== 'title' && pType !== 'text') return null;
+    if (post.type !== 'title' && (post.type as string) !== 'text') return null;
     return { __html: marked.parse(post.content, { breaks: true, gfm: true }) };
   }, [post.content, post.type]);
 
@@ -107,19 +106,19 @@ const Post: React.FC<PostProps> = ({
       case 'title':
       case 'text':
         return (
-          <div className="space-y-3">
+          <div className="space-y-2">
              {post.metadata?.image && (
-                <div className={`w-full h-32 rounded-xl overflow-hidden mb-2 border border-black/5 ${post.metadata.image.includes('from-') ? 'bg-gradient-to-br ' + post.metadata.image : ''}`}>
+                <div className={`w-full h-32 rounded-xl overflow-hidden mb-3 border border-black/5 ${post.metadata.image.includes('from-') ? 'bg-gradient-to-br ' + post.metadata.image : ''}`}>
                    { !post.metadata.image.includes('from-') && <img src={post.metadata.image} className="w-full h-full object-cover" alt="Header" /> }
                 </div>
              )}
+             {post.metadata?.title && (
+                <h3 className="text-xl font-black text-slate-900 leading-tight tracking-tight mb-2">{post.metadata.title}</h3>
+             )}
              <div 
-               className={`markdown-content text-slate-900 ${pType === 'title' ? 'font-black text-xl leading-tight tracking-tight' : 'font-medium'}`} 
+               className="markdown-content text-slate-700 font-medium" 
                dangerouslySetInnerHTML={renderedMarkdown as any} 
              />
-             {pType === 'title' && post.metadata?.caption && (
-               <p className="text-[10px] font-bold text-slate-500 uppercase tracking-widest pt-2 border-t border-black/5">{post.metadata.caption}</p>
-             )}
           </div>
         );
       case 'image':
@@ -127,20 +126,11 @@ const Post: React.FC<PostProps> = ({
         return (
           <div className={`w-full rounded-xl overflow-hidden mb-2 border border-black/5 ${isGradient ? 'bg-gradient-to-br h-48 ' + post.content : ''}`}>
             {!isGradient && <img src={post.content} alt="Post content" className="w-full h-auto object-cover max-h-64 pointer-events-none" />}
-            {post.metadata?.caption && (
-              <div className="p-3 bg-white/40 backdrop-blur-md border-t border-black/5">
-                <p className="text-xs font-bold text-slate-800 leading-relaxed italic">{post.metadata.caption}</p>
-              </div>
-            )}
+            {post.metadata?.caption && <p className="p-3 text-xs font-bold text-slate-800 bg-white/40 italic">{post.metadata.caption}</p>}
           </div>
         );
       case 'gif':
-        return (
-          <div className="space-y-2">
-            <img src={post.content} alt="GIF" className="w-full h-auto rounded-xl mb-1 pointer-events-none border border-black/5" />
-            {post.metadata?.caption && <p className="text-[10px] font-bold text-slate-500 italic px-1">{post.metadata.caption}</p>}
-          </div>
-        );
+        return <img src={post.content} alt="GIF" className="w-full h-auto rounded-lg mb-2 pointer-events-none" />;
       case 'link':
         return (
           <a href={post.metadata?.url} target="_blank" rel="noopener noreferrer" className="block bg-white/60 rounded-xl overflow-hidden hover:bg-white/90 transition-all border border-black/5 group shadow-sm">
@@ -153,7 +143,6 @@ const Post: React.FC<PostProps> = ({
                 <ExternalLink size={12} className="text-slate-400 group-hover:text-indigo-500" />
               </div>
               <p className="text-sm font-bold line-clamp-2 text-slate-900 leading-tight">{post.metadata?.title || post.content}</p>
-              {post.metadata?.caption && <p className="text-[10px] text-slate-500 mt-2 italic line-clamp-1">{post.metadata.caption}</p>}
             </div>
           </a>
         );
@@ -162,7 +151,7 @@ const Post: React.FC<PostProps> = ({
             <a href={post.metadata?.url} target="_blank" rel="noopener noreferrer" className="block bg-white/80 rounded-xl overflow-hidden hover:bg-white transition-all border border-black/5 group shadow-sm">
                 <div className="p-4 flex items-start gap-3">
                     {post.metadata?.image ? (
-                        <img src={post.metadata.image} className="w-12 h-12 rounded-lg object-cover bg-slate-100 border border-black/5" alt="Preview" referrerPolicy="no-referrer" />
+                        <img src={post.metadata.image} className="w-12 h-12 rounded-lg object-cover bg-slate-100" alt="Preview" referrerPolicy="no-referrer" />
                     ) : (
                         <div className="w-12 h-12 rounded-lg bg-slate-100 flex items-center justify-center">
                             <HardDrive className="text-slate-400" size={24} />
@@ -174,30 +163,26 @@ const Post: React.FC<PostProps> = ({
                             <span className="text-[10px] font-black text-slate-400 uppercase tracking-wider">Drive</span>
                         </div>
                         <p className="text-sm font-bold text-slate-900 leading-tight truncate">{post.metadata?.title || "Drive File"}</p>
-                        {post.metadata?.caption && <p className="text-[10px] text-slate-500 mt-1 italic truncate">{post.metadata.caption}</p>}
                     </div>
                 </div>
             </a>
         );
       case 'video':
         return (
-          <div className="space-y-2">
-            <div className="relative group rounded-xl overflow-hidden bg-black aspect-video border border-black/5">
-              <video 
-                src={post.content} 
-                poster={post.metadata?.videoThumbnail}
-                controls 
-                className="w-full h-full" 
-              />
-            </div>
-            {post.metadata?.caption && <p className="text-[10px] font-bold text-slate-500 italic px-1">{post.metadata.caption}</p>}
+          <div className="relative group rounded-lg overflow-hidden mb-2 bg-black aspect-video">
+            <video 
+              src={post.content} 
+              poster={post.metadata?.videoThumbnail}
+              controls 
+              className="w-full h-full" 
+            />
           </div>
         );
       case 'ai':
         return (
-          <div className="relative p-4 bg-indigo-50/50 rounded-xl border-l-4 border-indigo-400 mb-2">
-            <div className="text-[10px] font-black text-indigo-400 mb-2 uppercase tracking-widest flex items-center gap-1"><Sparkles size={10} /> AI Enhanced</div>
-            <p className="text-sm text-slate-900 leading-relaxed font-bold italic">"{post.content}"</p>
+          <div className="relative p-3 bg-indigo-50 rounded-lg border-l-4 border-indigo-400 mb-2">
+            <div className="text-[10px] font-bold text-indigo-400 mb-1 uppercase tracking-widest flex items-center gap-1"><Sparkles size={10} /> AI Enhanced</div>
+            <p className="text-sm text-slate-900 leading-relaxed italic">"{post.content}"</p>
           </div>
         );
       default:
@@ -266,6 +251,14 @@ const Post: React.FC<PostProps> = ({
 
         <div className="min-h-[40px]">
           {renderContent()}
+          {(post.type !== 'title' && (post.type as string) !== 'text' && post.metadata?.caption) && (
+            <div className="mt-3 pt-3 border-t border-black/5 bg-white/40 -mx-4 px-4 pb-1 rounded-b-xl shadow-inner">
+              <p className="text-sm text-slate-900 font-bold italic flex gap-2">
+                <Quote size={12} className="text-indigo-500 flex-shrink-0 mt-0.5" />
+                {post.metadata.caption}
+              </p>
+            </div>
+          )}
         </div>
 
         <div className="mt-4 pt-3 border-t border-black/5 flex items-center justify-between">
