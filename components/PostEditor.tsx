@@ -1,11 +1,11 @@
 
 import React, { useState, useRef, useEffect } from 'react';
 import { PostType, Post } from '../types';
-import { X, Image as ImageIcon, Link as LinkIcon, Gift, Video, Sparkles, Send, Camera, StopCircle, Upload, Loader2, Type, Search, Check, Palette, MessageSquare, ShieldAlert, Save, HardDrive, Bold, Italic, Underline, Code, List, ListOrdered, Scissors } from 'lucide-react';
+import { X, Image as ImageIcon, Link as LinkIcon, Gift, Video, Sparkles, Send, Camera, StopCircle, Upload, Loader2, Type, Search, Check, Palette, MessageSquare, ShieldAlert, Save, HardDrive, Bold, Italic, Underline, Code, List, ListOrdered, Scissors, LayoutGrid, Link as LinkIconSmall } from 'lucide-react';
 import { refinePostContent, checkContentSafety } from '../services/geminiService';
-import { WALL_COLORS } from '../constants';
+import { WALL_COLORS, WALL_GRADIENTS } from '../constants';
+import { GoogleGenAI } from "@google/genai";
 
-// Declare global google for OAuth
 declare const google: any;
 
 interface PostEditorProps {
@@ -13,22 +13,22 @@ interface PostEditorProps {
   onSubmit: (post: Partial<Post>) => void;
   authorName: string;
   initialPost?: Post;
-  parentId?: string; // Support for attached details
+  parentId?: string;
 }
 
 const GIPHY_API_KEY = 'eo5zSu2rUveZJB4kxO3S1Rv57KkMbhiQ'; 
 const GOOGLE_CLIENT_ID = "6888240288-5v0p6nsoi64q1puv1vpvk1njd398ra8b.apps.googleusercontent.com";
 
 const PostEditor: React.FC<PostEditorProps> = ({ onClose, onSubmit, authorName, initialPost, parentId }) => {
-  const [type, setType] = useState<PostType>('text');
+  const [type, setType] = useState<PostType>('title');
   const [content, setContent] = useState('');
   const [caption, setCaption] = useState('');
   const [url, setUrl] = useState('');
+  const [headerImage, setHeaderImage] = useState<string | null>(null);
   const [selectedColor, setSelectedColor] = useState(WALL_COLORS[0]);
   const [isRecording, setIsRecording] = useState(false);
   const [videoBase64, setVideoBase64] = useState<string | null>(null);
   const [videoThumbnail, setVideoThumbnail] = useState<string | null>(null);
-  const [thumbnailTime, setThumbnailTime] = useState(0);
   const [videoDuration, setVideoDuration] = useState(0);
   const [isRefining, setIsRefining] = useState(false);
   const [isFetchingLink, setIsFetchingLink] = useState(false);
@@ -36,16 +36,19 @@ const PostEditor: React.FC<PostEditorProps> = ({ onClose, onSubmit, authorName, 
   const [isCheckingSafety, setIsCheckingSafety] = useState(false);
   const [safetyError, setSafetyError] = useState<string | null>(null);
   
+  // Image/Header Picker State
+  const [imagePickerTab, setImagePickerTab] = useState<'presets' | 'upload' | 'drive' | 'url' | 'search'>('presets');
+  const [imageSearch, setImageSearch] = useState('');
+  const [imageUrlInput, setImageUrlInput] = useState('');
+  const [isImageSearching, setIsImageSearching] = useState(false);
+  const [driveFiles, setDriveFiles] = useState<any[]>([]);
+  const [isDriveLoading, setIsDriveLoading] = useState(false);
+  const [driveToken, setDriveToken] = useState<string | null>(sessionStorage.getItem('google_drive_token'));
+
   // Giphy State
   const [gifSearch, setGifSearch] = useState('');
   const [gifs, setGifs] = useState<any[]>([]);
   const [isSearchingGifs, setIsSearchingGifs] = useState(false);
-
-  // Drive State
-  const [driveFiles, setDriveFiles] = useState<any[]>([]);
-  const [isDriveLoading, setIsDriveLoading] = useState(false);
-  const [driveToken, setDriveToken] = useState<string | null>(null);
-  const [driveSearch, setDriveSearch] = useState('');
 
   const videoRef = useRef<HTMLVideoElement>(null);
   const previewVideoRef = useRef<HTMLVideoElement>(null);
@@ -54,36 +57,27 @@ const PostEditor: React.FC<PostEditorProps> = ({ onClose, onSubmit, authorName, 
   const driveTokenClient = useRef<any>(null);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
 
-  // Initialize state if editing
   useEffect(() => {
     if (initialPost) {
-      setType(initialPost.type);
+      const pType = (initialPost.type as string) === 'text' ? 'title' : (initialPost.type as PostType);
+      setType(pType);
       setSelectedColor(initialPost.color || WALL_COLORS[0]);
-      
-      if (initialPost.metadata?.caption) {
-        setCaption(initialPost.metadata.caption);
-      }
-
-      if (initialPost.type === 'text') {
+      setCaption(initialPost.metadata?.caption || '');
+      if (pType === 'title') {
         setContent(initialPost.content);
-      } else if (initialPost.type === 'video') {
+        setHeaderImage(initialPost.metadata?.image || null);
+      } else if (pType === 'video') {
          setVideoBase64(initialPost.content);
-         if (initialPost.metadata?.videoThumbnail) {
-           setVideoThumbnail(initialPost.metadata.videoThumbnail);
-         }
-      } else if (initialPost.type === 'link') {
+         setVideoThumbnail(initialPost.metadata?.videoThumbnail || null);
+      } else if (pType === 'image' || pType === 'gif') {
          setUrl(initialPost.content);
-         setLinkMetadata(initialPost.metadata);
-      } else if (initialPost.type === 'drive') {
-         setUrl(initialPost.content);
-         setLinkMetadata(initialPost.metadata);
       } else {
          setUrl(initialPost.content);
+         setLinkMetadata(initialPost.metadata);
       }
     }
   }, [initialPost]);
 
-  // Init Google OAuth for Drive
   useEffect(() => {
     if (typeof google !== 'undefined' && google.accounts && google.accounts.oauth2) {
       driveTokenClient.current = google.accounts.oauth2.initTokenClient({
@@ -91,6 +85,7 @@ const PostEditor: React.FC<PostEditorProps> = ({ onClose, onSubmit, authorName, 
         scope: 'https://www.googleapis.com/auth/drive.readonly',
         callback: (response: any) => {
           if (response.access_token) {
+            sessionStorage.setItem('google_drive_token', response.access_token);
             setDriveToken(response.access_token);
             fetchDriveFiles(response.access_token);
           }
@@ -99,60 +94,61 @@ const PostEditor: React.FC<PostEditorProps> = ({ onClose, onSubmit, authorName, 
     }
   }, []);
 
-  const handleDriveAuth = () => {
-    if (driveTokenClient.current) {
-        driveTokenClient.current.requestAccessToken();
-    } else {
-        alert("Google services not ready. Please wait a moment.");
-    }
-  };
-
   const fetchDriveFiles = async (token: string, query: string = '') => {
     setIsDriveLoading(true);
     try {
-        let q = "trashed = false and mimeType != 'application/vnd.google-apps.folder'";
-        if (query) {
-            q += ` and name contains '${query}'`;
-        }
-        
-        const res = await fetch(`https://www.googleapis.com/drive/v3/files?q=${encodeURIComponent(q)}&pageSize=20&fields=files(id,name,thumbnailLink,webViewLink,mimeType,iconLink,webContentLink)`, {
+        let q = "trashed = false and mimeType contains 'image/'";
+        if (query) q += ` and name contains '${query}'`;
+        const res = await fetch(`https://www.googleapis.com/drive/v3/files?q=${encodeURIComponent(q)}&pageSize=20&fields=files(id,name,thumbnailLink,webViewLink,mimeType,iconLink)`, {
             headers: { Authorization: `Bearer ${token}` }
         });
-        
         if (res.ok) {
             const data = await res.json();
             setDriveFiles(data.files || []);
         }
-    } catch (e) {
-        console.error(e);
-    } finally {
-        setIsDriveLoading(false);
+    } catch (e) { console.error(e); } finally { setIsDriveLoading(false); }
+  };
+
+  const performImageSearch = async () => {
+    if (!imageSearch) return;
+    setIsImageSearching(true);
+    try {
+        const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
+        const response = await ai.models.generateContent({
+            model: 'gemini-3-flash-preview',
+            contents: `Find a direct, high-quality, publicly accessible image URL for: "${imageSearch}". Return ONLY the raw URL string.`,
+            config: { tools: [{ googleSearch: {} }] }
+        });
+        const foundUrl = response.text.trim().replace(/`/g, '');
+        if (foundUrl.startsWith('http')) {
+            if (type === 'title') setHeaderImage(foundUrl);
+            else setUrl(foundUrl);
+        }
+    } catch (e) { console.error(e); } finally { setIsImageSearching(false); }
+  };
+
+  const handleImageUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (file) {
+      const reader = new FileReader();
+      reader.onloadend = () => { 
+        if (type === 'title') setHeaderImage(reader.result as string);
+        else setUrl(reader.result as string);
+      };
+      reader.readAsDataURL(file);
     }
   };
 
   const searchGifs = async (query: string) => {
     setIsSearchingGifs(true);
     try {
-      let endpoint = `https://api.giphy.com/v1/gifs/search?api_key=${GIPHY_API_KEY}&q=${encodeURIComponent(query)}&limit=25&offset=0&rating=g&lang=en&bundle=messaging_non_clips`;
-      if (query === 'trending' || !query) {
-        endpoint = `https://api.giphy.com/v1/gifs/trending?api_key=${GIPHY_API_KEY}&limit=25&rating=g`;
-      }
-      
+      let endpoint = `https://api.giphy.com/v1/gifs/search?api_key=${GIPHY_API_KEY}&q=${encodeURIComponent(query)}&limit=25&rating=g`;
+      if (!query || query === 'trending') endpoint = `https://api.giphy.com/v1/gifs/trending?api_key=${GIPHY_API_KEY}&limit=25&rating=g`;
       const res = await fetch(endpoint);
       const data = await res.json();
       setGifs(data.data || []);
-    } catch (err) {
-      console.error("Giphy Fetch Error:", err);
-    } finally {
-      setIsSearchingGifs(false);
-    }
+    } catch (err) { console.error(err); } finally { setIsSearchingGifs(false); }
   };
-
-  useEffect(() => {
-    if (type === 'gif' && gifs.length === 0) {
-      searchGifs('trending');
-    }
-  }, [type]);
 
   const handleRefine = async () => {
     if (!content) return;
@@ -175,23 +171,8 @@ const PostEditor: React.FC<PostEditorProps> = ({ onClose, onSubmit, authorName, 
           image: data.data.image?.url || data.data.logo?.url,
           url: targetUrl
         });
-      } else {
-        setLinkMetadata({ title: targetUrl, url: targetUrl });
       }
-    } catch (err) {
-      setLinkMetadata({ title: targetUrl, url: targetUrl });
-    } finally {
-      setIsFetchingLink(false);
-    }
-  };
-
-  const handleImageUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
-    const file = e.target.files?.[0];
-    if (file) {
-      const reader = new FileReader();
-      reader.onloadend = () => { setUrl(reader.result as string); };
-      reader.readAsDataURL(file);
-    }
+    } catch (err) {} finally { setIsFetchingLink(false); }
   };
 
   const startRecording = async () => {
@@ -208,134 +189,47 @@ const PostEditor: React.FC<PostEditorProps> = ({ onClose, onSubmit, authorName, 
         reader.readAsDataURL(blob);
         reader.onloadend = () => { 
           setVideoBase64(reader.result as string);
-          setVideoThumbnail(null); // Reset thumbnail on new record
+          setVideoThumbnail(null);
         };
         stream.getTracks().forEach(t => t.stop());
       };
       recorder.start();
       setIsRecording(true);
-    } catch (err) {
-      alert("Microphone/Camera access required");
-    }
+    } catch (err) { alert("Microphone/Camera access required"); }
   };
 
-  const stopRecording = () => {
-    mediaRecorderRef.current?.stop();
-    setIsRecording(false);
-  };
-
-  // Thumbnail Capture Logic
-  const captureThumbnail = () => {
-    const video = previewVideoRef.current;
-    if (!video) return;
-
-    const canvas = document.createElement('canvas');
-    canvas.width = video.videoWidth;
-    canvas.height = video.videoHeight;
-    const ctx = canvas.getContext('2d');
-    if (ctx) {
-      ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
-      const dataUrl = canvas.toDataURL('image/jpeg', 0.8);
-      setVideoThumbnail(dataUrl);
-    }
-  };
-
-  const handleScrub = (e: React.ChangeEvent<HTMLInputElement>) => {
-    const time = parseFloat(e.target.value);
-    setThumbnailTime(time);
-    if (previewVideoRef.current) {
-      previewVideoRef.current.currentTime = time;
-    }
-  };
-
-  const applyMarkdown = (prefix: string, suffix: string = '') => {
-    const textarea = textareaRef.current;
-    if (!textarea) return;
-
-    const start = textarea.selectionStart;
-    const end = textarea.selectionEnd;
-    const text = textarea.value;
-    const selected = text.substring(start, end);
-    const before = text.substring(0, start);
-    const after = text.substring(end);
-
-    const newText = `${before}${prefix}${selected}${suffix}${after}`;
-    setContent(newText);
-    
-    // Restore focus and selection
-    setTimeout(() => {
-      textarea.focus();
-      textarea.setSelectionRange(start + prefix.length, end + prefix.length);
-    }, 0);
-  };
-
-  const handleSelectDriveFile = (file: any) => {
-      setUrl(file.webViewLink);
-      setLinkMetadata({
-          title: file.name,
-          mimeType: file.mimeType,
-          image: file.thumbnailLink,
-          iconLink: file.iconLink,
-          url: file.webViewLink
-      });
-  };
+  const stopRecording = () => { mediaRecorderRef.current?.stop(); setIsRecording(false); };
 
   const handleSubmit = async () => {
     let submissionContent = content;
-    let submissionMetadata: any = {};
+    let submissionMetadata: any = { caption };
     setSafetyError(null);
 
     if (type === 'video') {
       submissionContent = videoBase64 || '';
       submissionMetadata.videoThumbnail = videoThumbnail;
-    }
-    else if (type === 'image' || type === 'gif') submissionContent = url;
-    else if (type === 'link') {
+    } else if (type === 'image' || type === 'gif') {
       submissionContent = url;
-      submissionMetadata = { ...(linkMetadata || { url, title: url }) };
-    }
-    else if (type === 'drive') {
-        submissionContent = url;
-        submissionMetadata = linkMetadata;
-    }
-
-    if (!submissionContent && type !== 'text') return;
-    if (type === 'text' && !content) return;
-
-    if (caption) {
-      submissionMetadata.caption = caption;
-    }
-    
-    if (initialPost && initialPost.metadata) {
-        submissionMetadata = { ...initialPost.metadata, ...submissionMetadata };
+    } else if (type === 'link' || type === 'drive') {
+      submissionContent = url;
+      submissionMetadata = { ...submissionMetadata, ...linkMetadata };
+    } else if (type === 'title') {
+      submissionContent = content;
+      submissionMetadata.image = headerImage;
     }
 
-    // --- SAFETY CHECK START ---
+    if (!submissionContent && type !== 'title') return;
+    if (type === 'title' && !content) return;
+
     setIsCheckingSafety(true);
-    const textToCheckParts = [];
-    if (type === 'text') textToCheckParts.push(content);
-    if (caption) textToCheckParts.push(caption);
-    if ((type === 'link' || type === 'drive') && linkMetadata) {
-      if (linkMetadata.title) textToCheckParts.push(linkMetadata.title);
-      if (linkMetadata.description) textToCheckParts.push(linkMetadata.description);
-    }
-    if (url) textToCheckParts.push(url);
-    const textToAnalyze = textToCheckParts.join(' ');
-    let imageToAnalyze = undefined;
-    if (type === 'image' && url.startsWith('data:')) {
-        imageToAnalyze = url;
-    }
-    if (textToAnalyze.length > 0 || imageToAnalyze) {
-      const safetyResult = await checkContentSafety(textToAnalyze, imageToAnalyze);
-      if (!safetyResult.isSafe) {
-        setIsCheckingSafety(false);
-        setSafetyError(safetyResult.reason || "Content flagged as inappropriate.");
-        return; 
-      }
+    const safetyResult = await checkContentSafety(submissionContent + ' ' + caption, (type === 'image' && url.startsWith('data:')) ? url : undefined);
+    if (!safetyResult.isSafe) {
+      setIsCheckingSafety(false);
+      setSafetyError(safetyResult.reason || "Inappropriate content.");
+      return;
     }
     setIsCheckingSafety(false);
-    // --- SAFETY CHECK END ---
-    
+
     onSubmit({
       type,
       content: submissionContent,
@@ -345,48 +239,104 @@ const PostEditor: React.FC<PostEditorProps> = ({ onClose, onSubmit, authorName, 
     });
   };
 
+  const ImagePickerUI = () => (
+    <div className="space-y-4">
+      <div className="flex gap-2 p-1 bg-black/5 rounded-xl overflow-x-auto">
+        {[
+          { id: 'presets', icon: LayoutGrid, label: 'Presets' },
+          { id: 'upload', icon: Upload, label: 'Upload' },
+          { id: 'drive', icon: HardDrive, label: 'Drive' },
+          { id: 'url', icon: LinkIconSmall, label: 'URL' },
+          { id: 'search', icon: Search, label: 'Search' }
+        ].map(tab => (
+          <button key={tab.id} onClick={() => setImagePickerTab(tab.id as any)} className={`flex-1 py-2 px-3 rounded-lg flex items-center justify-center gap-2 text-[9px] font-black uppercase tracking-widest transition-all ${imagePickerTab === tab.id ? 'bg-white shadow-sm text-cyan-600' : 'text-slate-500 hover:bg-white/50'}`}>
+            <tab.icon size={14} /> {tab.label}
+          </button>
+        ))}
+      </div>
+      <div className="min-h-[140px] p-4 bg-black/5 rounded-2xl border border-black/5">
+        {imagePickerTab === 'presets' && (
+          <div className="grid grid-cols-4 gap-2">
+            {WALL_GRADIENTS.map(g => (
+              <button key={g} onClick={() => { if(type==='title') setHeaderImage(g); else setUrl(g); }} className={`h-12 rounded-lg bg-gradient-to-br ${g} border border-black/10`} />
+            ))}
+          </div>
+        )}
+        {imagePickerTab === 'upload' && (
+          <div className="flex flex-col items-center justify-center py-4 cursor-pointer hover:bg-black/5 rounded-xl transition-colors" onClick={() => fileInputRef.current?.click()}>
+            <Upload className="text-slate-400 mb-2" size={32} />
+            <p className="text-xs font-bold text-slate-500">Click to upload file</p>
+            <input ref={fileInputRef} type="file" accept="image/*" className="hidden" onChange={handleImageUpload} />
+          </div>
+        )}
+        {imagePickerTab === 'drive' && (
+          <div className="space-y-3">
+            {!driveToken ? (
+              <button onClick={() => driveTokenClient.current?.requestAccessToken()} className="w-full py-3 bg-slate-800 text-white rounded-xl text-xs font-bold">Connect Google Drive</button>
+            ) : (
+              <div className="grid grid-cols-4 gap-2 h-32 overflow-y-auto custom-scrollbar pr-1">
+                {driveFiles.map(file => (
+                  <button key={file.id} onClick={() => { 
+                    const directUrl = file.thumbnailLink?.replace(/=s\d+$/, '=s0');
+                    if(type==='title') setHeaderImage(directUrl || file.thumbnailLink); 
+                    else setUrl(directUrl || file.thumbnailLink); 
+                  }} className="relative block aspect-square w-full rounded-lg overflow-hidden border border-black/10">
+                    <img src={file.thumbnailLink} className="absolute inset-0 w-full h-full object-cover" alt="" referrerPolicy="no-referrer" />
+                  </button>
+                ))}
+                {driveFiles.length === 0 && <p className="col-span-full text-center text-[10px] text-slate-400 py-10 font-bold uppercase">No images found</p>}
+              </div>
+            )}
+          </div>
+        )}
+        {imagePickerTab === 'url' && (
+          <div className="flex gap-2">
+            <input type="text" placeholder="https://image-url.com/img.jpg" className="flex-1 px-3 py-2 bg-white border border-black/10 rounded-lg text-xs outline-none focus:ring-2 focus:ring-cyan-500/20" value={imageUrlInput} onChange={e => setImageUrlInput(e.target.value)} />
+            <button onClick={() => { if(type==='title') setHeaderImage(imageUrlInput); else setUrl(imageUrlInput); setImageUrlInput(''); }} className="px-4 py-2 bg-slate-800 text-white rounded-lg text-xs font-bold">Apply</button>
+          </div>
+        )}
+        {imagePickerTab === 'search' && (
+          <div className="space-y-2">
+            <div className="flex gap-2">
+              <input type="text" placeholder="Space, Abstract, Nature..." className="flex-1 px-3 py-2 bg-white border border-black/10 rounded-lg text-xs outline-none focus:ring-2 focus:ring-cyan-500/20" value={imageSearch} onChange={e => setImageSearch(e.target.value)} onKeyDown={e => e.key === 'Enter' && performImageSearch()} />
+              <button onClick={performImageSearch} disabled={isImageSearching} className="px-4 py-2 bg-indigo-600 text-white rounded-lg text-xs font-bold disabled:opacity-50">
+                {isImageSearching ? <Loader2 className="animate-spin" size={14} /> : 'Go'}
+              </button>
+            </div>
+          </div>
+        )}
+        {(type === 'title' ? headerImage : url) && (
+          <div className="mt-4 flex items-center justify-between p-2 bg-white rounded-xl border border-black/5">
+            <div className={`h-12 w-20 rounded-lg border border-black/10 overflow-hidden ${ (type==='title'?headerImage:url)?.includes('from-') ? 'bg-gradient-to-br '+(type==='title'?headerImage:url) : '' }`}>
+               { !(type==='title'?headerImage:url)?.includes('from-') && <img src={type==='title' ? headerImage! : url} className="w-full h-full object-cover" alt="" /> }
+            </div>
+            <button onClick={() => { if(type==='title') setHeaderImage(null); else setUrl(''); }} className="px-3 py-1 text-[10px] font-black text-red-500 uppercase tracking-widest hover:bg-red-50 rounded-lg transition-colors">Clear Image</button>
+          </div>
+        )}
+      </div>
+    </div>
+  );
+
   const isHexColor = selectedColor.startsWith('#');
 
   return (
     <div className="fixed inset-0 z-[100] flex items-center justify-center p-4 bg-slate-900/60 backdrop-blur-sm animate-in fade-in duration-300">
-      <div 
-        className={`w-full max-w-xl rounded-3xl shadow-2xl overflow-hidden flex flex-col max-h-[90vh] transition-colors duration-300 ${!isHexColor && selectedColor === 'bg-white' ? 'bg-white' : (!isHexColor ? selectedColor : '')}`}
-        style={{ backgroundColor: isHexColor ? selectedColor : undefined }}
-      >
+      <div className={`w-full max-w-xl rounded-3xl shadow-2xl overflow-hidden flex flex-col max-h-[90vh] transition-colors duration-300 ${!isHexColor && selectedColor === 'bg-white' ? 'bg-white' : (!isHexColor ? selectedColor : '')}`} style={{ backgroundColor: isHexColor ? selectedColor : undefined }}>
         <div className="p-6 border-b border-black/5 flex items-center justify-between bg-white/50 backdrop-blur-sm">
-          <div>
-            <h3 className="text-xl font-bold text-slate-800">{parentId ? 'Add Detail to Milestone' : (initialPost ? 'Edit Post' : 'Add to Wallama')}</h3>
-            <p className="text-sm text-slate-600 font-medium">Author: {authorName}</p>
-          </div>
-          <button onClick={onClose} className="p-2 hover:bg-black/5 rounded-full transition-colors text-slate-500">
-            <X size={20} />
-          </button>
+          <h3 className="text-xl font-bold text-slate-800">{initialPost ? 'Edit Post' : 'Create Post'}</h3>
+          <button onClick={onClose} className="p-2 hover:bg-black/5 rounded-full transition-colors text-slate-500"><X size={20} /></button>
         </div>
 
         <div className="p-6 overflow-y-auto flex-1 space-y-6 custom-scrollbar">
-          {/* Post Type Selector */}
           <div className="flex gap-2 p-1 bg-black/5 rounded-xl overflow-x-auto">
             {[
-              { id: 'text', icon: Type, label: 'Text' },
+              { id: 'title', icon: Type, label: 'Title' },
               { id: 'image', icon: ImageIcon, label: 'Image' },
               { id: 'link', icon: LinkIcon, label: 'Link' },
-              { id: 'drive', icon: HardDrive, label: 'Drive' },
               { id: 'gif', icon: Gift, label: 'GIF' },
               { id: 'video', icon: Video, label: 'Video' }
             ].map((tab) => (
-              <button
-                key={tab.id}
-                onClick={() => { 
-                    setType(tab.id as PostType); 
-                    if (tab.id !== 'text') setContent(''); 
-                    if (tab.id !== 'drive') { 
-                       setUrl(''); 
-                       setLinkMetadata(null);
-                    }
-                    setSafetyError(null); 
-                }}
-                className={`flex-1 min-w-[60px] flex flex-col items-center gap-1 py-3 px-2 rounded-lg transition-all ${type === tab.id ? 'bg-white shadow-sm text-cyan-600' : 'text-slate-500 hover:bg-black/5'}`}
-              >
+              <button key={tab.id} onClick={() => { setType(tab.id as PostType); setSafetyError(null); }} className={`flex-1 min-w-[60px] flex flex-col items-center gap-1 py-3 px-2 rounded-lg transition-all ${type === tab.id ? 'bg-white shadow-sm text-cyan-600' : 'text-slate-500 hover:bg-black/5'}`}>
                 <tab.icon size={20} />
                 <span className="text-[10px] font-bold uppercase tracking-widest">{tab.label}</span>
               </button>
@@ -394,136 +344,42 @@ const PostEditor: React.FC<PostEditorProps> = ({ onClose, onSubmit, authorName, 
           </div>
 
           <div className="space-y-4">
-            {type === 'text' && (
-              <div className="space-y-2">
-                {/* Markdown Toolbar */}
-                <div className="flex gap-1 p-1 bg-white/30 rounded-lg border border-black/5">
-                  <button onClick={() => applyMarkdown('**', '**')} className="p-2 hover:bg-white/50 rounded-md transition-colors" title="Bold"><Bold size={16} /></button>
-                  <button onClick={() => applyMarkdown('*', '*')} className="p-2 hover:bg-white/50 rounded-md transition-colors" title="Italic"><Italic size={16} /></button>
-                  <button onClick={() => applyMarkdown('<u>', '</u>')} className="p-2 hover:bg-white/50 rounded-md transition-colors" title="Underline"><Underline size={16} /></button>
-                  <div className="w-px h-6 bg-black/10 mx-1 self-center" />
-                  <button onClick={() => applyMarkdown('`', '`')} className="p-2 hover:bg-white/50 rounded-md transition-colors" title="Code"><Code size={16} /></button>
-                  <button onClick={() => applyMarkdown('- ')} className="p-2 hover:bg-white/50 rounded-md transition-colors" title="Bullet List"><List size={16} /></button>
-                  <button onClick={() => applyMarkdown('1. ')} className="p-2 hover:bg-white/50 rounded-md transition-colors" title="Numbered List"><ListOrdered size={16} /></button>
+            {type === 'title' && (
+              <div className="space-y-4">
+                <div className="space-y-2">
+                   <label className="text-xs font-black text-slate-400 uppercase tracking-widest ml-1">Header Image (Optional)</label>
+                   <ImagePickerUI />
                 </div>
                 <div className="relative">
-                  <textarea
-                    ref={textareaRef}
-                    value={content}
-                    onChange={(e) => { setContent(e.target.value); setSafetyError(null); }}
-                    placeholder="Type something amazing... Markdown supported!"
-                    className="w-full h-40 p-4 bg-white/50 border border-black/5 rounded-2xl focus:ring-4 focus:ring-cyan-500/20 focus:border-cyan-500 outline-none resize-none text-lg text-slate-900 placeholder:text-slate-400"
-                  />
-                  <button
-                    onClick={handleRefine}
-                    disabled={!content || isRefining}
-                    className="absolute bottom-4 right-4 flex items-center gap-2 px-3 py-1.5 bg-cyan-600 text-white rounded-full text-xs font-bold hover:bg-cyan-700 disabled:opacity-50 shadow-md transition-all"
-                  >
-                    <Sparkles size={14} /> {isRefining ? 'Refining...' : 'AI Refine'}
-                  </button>
+                  <textarea ref={textareaRef} value={content} onChange={(e) => setContent(e.target.value)} placeholder="Enter a striking title or thought..." className="w-full h-32 p-4 bg-white/50 border border-black/5 rounded-2xl focus:ring-4 focus:ring-cyan-500/20 focus:border-cyan-500 outline-none resize-none text-lg font-bold text-slate-900" />
+                  <button onClick={handleRefine} disabled={!content || isRefining} className="absolute bottom-4 right-4 flex items-center gap-2 px-3 py-1.5 bg-cyan-600 text-white rounded-full text-xs font-bold shadow-md transition-all active:scale-95"><Sparkles size={14} /> {isRefining ? '...' : 'AI Refine'}</button>
                 </div>
+              </div>
+            )}
+
+            {type === 'image' && (
+              <div className="space-y-2">
+                <label className="text-xs font-black text-slate-400 uppercase tracking-widest ml-1">Image Selection</label>
+                <ImagePickerUI />
               </div>
             )}
 
             {type === 'link' && (
               <div className="space-y-4">
-                <div className="relative">
-                  <input
-                    type="text"
-                    value={url}
-                    onBlur={() => fetchLinkMetadata(url)}
-                    onChange={(e) => { setUrl(e.target.value); setSafetyError(null); }}
-                    placeholder="https://example.com"
-                    className="w-full p-4 bg-white/50 border border-black/5 rounded-xl outline-none text-slate-900 placeholder:text-slate-400 focus:ring-4 focus:ring-cyan-500/20"
-                  />
-                  {isFetchingLink && <Loader2 className="absolute right-4 top-4 animate-spin text-cyan-500" size={20} />}
-                </div>
-                {linkMetadata && (
-                  <div className="p-4 bg-white/60 rounded-2xl border border-black/5 flex gap-4">
-                    {linkMetadata.image && <img src={linkMetadata.image} className="h-20 w-20 rounded-lg object-cover" alt="Thumb" />}
-                    <div className="flex-1">
-                      <p className="text-sm font-bold text-slate-900 line-clamp-1">{linkMetadata.title}</p>
-                      {linkMetadata.description && <p className="text-xs text-slate-500 line-clamp-2 mt-1">{linkMetadata.description}</p>}
-                    </div>
-                  </div>
-                )}
+                <input type="text" value={url} onBlur={() => fetchLinkMetadata(url)} onChange={(e) => setUrl(e.target.value)} placeholder="https://example.com" className="w-full p-4 bg-white/50 border border-black/5 rounded-xl outline-none text-slate-900 font-medium" />
+                {linkMetadata && <div className="p-4 bg-white/60 rounded-2xl border border-black/5 flex gap-4">{linkMetadata.image && <img src={linkMetadata.image} className="h-16 w-16 rounded-lg object-cover border" alt="" />}<div className="flex-1"><p className="text-sm font-bold text-slate-900 line-clamp-2">{linkMetadata.title}</p></div></div>}
               </div>
-            )}
-
-            {type === 'drive' && (
-                <div className="space-y-4">
-                    {!driveToken ? (
-                        <div className="text-center py-10 bg-white/50 rounded-2xl border border-black/5">
-                            <HardDrive size={48} className="mx-auto text-slate-300 mb-4" />
-                            <p className="text-slate-600 font-medium mb-4">Connect Google Drive to select files.</p>
-                            <button onClick={handleDriveAuth} className="px-6 py-2 bg-slate-800 text-white rounded-full font-bold hover:bg-slate-900 transition-colors">
-                                Connect Drive
-                            </button>
-                        </div>
-                    ) : (
-                        <div className="space-y-3">
-                            <div className="relative">
-                                <input 
-                                  type="text" 
-                                  placeholder="Search Drive..." 
-                                  value={driveSearch}
-                                  onChange={(e) => setDriveSearch(e.target.value)}
-                                  onKeyDown={(e) => e.key === 'Enter' && fetchDriveFiles(driveToken, driveSearch)}
-                                  className="w-full pl-10 pr-4 py-3 bg-white/50 border border-black/5 rounded-xl outline-none focus:ring-2 focus:ring-cyan-500/20"
-                                />
-                                <Search size={18} className="absolute left-3 top-3.5 text-slate-400" />
-                                {isDriveLoading && <Loader2 size={18} className="absolute right-3 top-3.5 animate-spin text-cyan-500" />}
-                            </div>
-                            <div className="grid grid-cols-2 gap-2 max-h-60 overflow-y-auto custom-scrollbar p-1">
-                                {driveFiles.map(file => (
-                                    <div 
-                                      key={file.id} 
-                                      onClick={() => handleSelectDriveFile(file)}
-                                      className={`p-3 bg-white rounded-xl border cursor-pointer transition-all flex items-center gap-3 ${url === file.webViewLink ? 'border-cyan-600 ring-2 ring-cyan-500/20' : 'border-black/5 hover:bg-white/80'}`}
-                                    >
-                                        {file.thumbnailLink ? (
-                                            <img src={file.thumbnailLink} className="w-10 h-10 object-cover rounded-lg" alt="Thumb" referrerPolicy="no-referrer" />
-                                        ) : (
-                                            <img src={file.iconLink} className="w-8 h-8" alt="Icon" />
-                                        )}
-                                        <div className="overflow-hidden">
-                                            <p className="text-xs font-bold text-slate-800 truncate">{file.name}</p>
-                                            <p className="text-[10px] text-slate-500 truncate">Google Drive</p>
-                                        </div>
-                                    </div>
-                                ))}
-                            </div>
-                        </div>
-                    )}
-                </div>
             )}
 
             {type === 'gif' && (
               <div className="space-y-4">
-                <div className="flex gap-2 w-full">
-                  <div className="relative flex-1 min-w-0">
-                    <input
-                      type="text"
-                      value={gifSearch}
-                      onChange={(e) => setGifSearch(e.target.value)}
-                      onKeyDown={(e) => e.key === 'Enter' && searchGifs(gifSearch)}
-                      placeholder="Search Giphy..."
-                      className="w-full pl-12 pr-4 py-4 bg-white/50 border border-black/5 rounded-xl outline-none focus:ring-4 focus:ring-cyan-500/20 text-slate-900 placeholder:text-slate-500"
-                    />
-                    <Search className="absolute left-4 top-4 text-slate-400" size={20} />
-                    {isSearchingGifs && <Loader2 className="absolute right-4 top-4 animate-spin text-cyan-500" size={20} />}
-                  </div>
-                  <button onClick={() => searchGifs(gifSearch)} className="flex-shrink-0 px-6 bg-cyan-600 text-white rounded-xl font-bold">Search</button>
+                <div className="flex gap-2">
+                  <input type="text" value={gifSearch} onChange={(e) => setGifSearch(e.target.value)} onKeyDown={(e) => e.key === 'Enter' && searchGifs(gifSearch)} placeholder="Search Giphy..." className="flex-1 p-4 bg-white/50 border border-black/5 rounded-xl outline-none font-medium" />
+                  <button onClick={() => searchGifs(gifSearch)} className="px-6 bg-cyan-600 text-white rounded-xl font-bold active:scale-95">Find</button>
                 </div>
-                <div className="grid grid-cols-3 gap-2 max-h-72 overflow-y-auto p-1 custom-scrollbar">
+                <div className="grid grid-cols-3 gap-2 max-h-48 overflow-y-auto p-1 custom-scrollbar">
                   {gifs.map(gif => (
-                    <button
-                      key={gif.id}
-                      onClick={() => setUrl(gif.images.fixed_height.url)}
-                      className={`relative aspect-square rounded-lg overflow-hidden border-4 transition-all ${url === gif.images.fixed_height.url ? 'border-cyan-600' : 'border-transparent'}`}
-                    >
-                      <img src={gif.images.fixed_height.url} className="w-full h-full object-cover" alt="" />
-                    </button>
+                    <button key={gif.id} onClick={() => setUrl(gif.images.fixed_height.url)} className={`aspect-square rounded-lg overflow-hidden border-4 transition-all ${url === gif.images.fixed_height.url ? 'border-cyan-600 scale-95' : 'border-transparent'}`}><img src={gif.images.fixed_height.url} className="w-full h-full object-cover" alt="" /></button>
                   ))}
                 </div>
               </div>
@@ -533,118 +389,35 @@ const PostEditor: React.FC<PostEditorProps> = ({ onClose, onSubmit, authorName, 
               <div className="space-y-4">
                 <div className="aspect-video bg-black rounded-2xl overflow-hidden relative shadow-inner">
                   <video ref={videoRef} autoPlay muted playsInline className={`w-full h-full object-cover ${!isRecording && !videoBase64 ? 'hidden' : ''}`} />
-                  {videoBase64 && !isRecording && (
-                    <video 
-                      ref={previewVideoRef} 
-                      src={videoBase64} 
-                      onLoadedMetadata={(e) => setVideoDuration(e.currentTarget.duration)}
-                      controls={false} 
-                      className="w-full h-full object-cover absolute inset-0" 
-                    />
-                  )}
+                  {videoBase64 && !isRecording && <video ref={previewVideoRef} src={videoBase64} onLoadedMetadata={(e) => setVideoDuration(e.currentTarget.duration)} className="w-full h-full object-cover absolute inset-0" />}
                 </div>
-
-                {videoBase64 && !isRecording && (
-                  <div className="p-4 bg-white/50 rounded-2xl border border-black/5 space-y-3">
-                    <label className="text-xs font-black text-slate-400 uppercase tracking-widest flex items-center gap-2">
-                       <Scissors size={14} /> Select Thumbnail Frame
-                    </label>
-                    <div className="flex items-center gap-3">
-                      <input 
-                        type="range" 
-                        min="0" 
-                        max={videoDuration || 100} 
-                        step="0.1" 
-                        value={thumbnailTime} 
-                        onChange={handleScrub}
-                        className="flex-1 accent-cyan-600"
-                      />
-                      <button 
-                        onClick={captureThumbnail}
-                        className="px-4 py-2 bg-slate-800 text-white rounded-lg text-xs font-bold hover:bg-slate-900 transition-all flex items-center gap-2"
-                      >
-                         Capture
-                      </button>
-                    </div>
-                    {videoThumbnail && (
-                      <div className="flex items-center gap-3 mt-2">
-                        <img src={videoThumbnail} className="h-16 w-28 rounded-lg object-cover border border-black/10" alt="Thumb" />
-                        <span className="text-[10px] font-bold text-green-600 uppercase tracking-widest flex items-center gap-1">
-                          <Check size={12} /> Thumbnail Set
-                        </span>
-                      </div>
-                    )}
-                  </div>
-                )}
-
                 <div className="flex justify-center gap-4">
-                  {!isRecording ? (
-                    <button onClick={startRecording} className="flex items-center gap-2 px-8 py-3 bg-red-600 text-white rounded-full hover:bg-red-700 font-bold">
-                      <Camera size={20} /> {videoBase64 ? 'Record New' : 'Start Recording'}
-                    </button>
-                  ) : (
-                    <button onClick={stopRecording} className="flex items-center gap-2 px-8 py-3 bg-slate-800 text-white rounded-full font-bold animate-pulse">
-                      <StopCircle size={20} /> Stop
-                    </button>
-                  )}
-                </div>
-              </div>
-            )}
-
-            {type === 'image' && (
-               <div className="space-y-4">
-                <div onClick={() => fileInputRef.current?.click()} className="w-full h-48 border-2 border-dashed border-slate-300 rounded-2xl flex flex-col items-center justify-center gap-2 cursor-pointer hover:bg-white/50 bg-white/30 overflow-hidden">
-                  {url ? <img src={url} className="w-full h-full object-contain" alt="Preview" /> : <><Upload size={40} /><p className="text-sm font-bold">Upload Image</p></>}
-                  <input ref={fileInputRef} type="file" accept="image/*" onChange={handleImageUpload} className="hidden" />
+                  {!isRecording ? <button onClick={startRecording} className="px-8 py-3 bg-red-600 text-white rounded-full font-bold shadow-lg active:scale-95">Start Recording</button> : <button onClick={stopRecording} className="px-8 py-3 bg-slate-800 text-white rounded-full font-bold shadow-lg active:scale-95">Stop</button>}
                 </div>
               </div>
             )}
 
             <div className="pt-2">
-              <label className="block text-xs font-black text-slate-400 uppercase tracking-widest mb-2 flex items-center gap-2">
-                <MessageSquare size={14} /> Caption (Optional)
-              </label>
-              <input
-                type="text"
-                value={caption}
-                onChange={(e) => { setCaption(e.target.value); setSafetyError(null); }}
-                placeholder="Add a description..."
-                className="w-full px-4 py-3 bg-white/50 border border-black/5 rounded-xl outline-none text-sm"
-              />
+              <label className="block text-xs font-black text-slate-400 uppercase tracking-widest mb-2">Caption / Context (Optional)</label>
+              <input type="text" value={caption} onChange={(e) => setCaption(e.target.value)} placeholder="Add some context..." className="w-full px-4 py-3 bg-white/50 border border-black/5 rounded-xl outline-none text-sm font-medium" />
             </div>
 
             <div className="pt-2">
-              <label className="block text-xs font-black text-slate-400 uppercase tracking-widest mb-3 flex items-center gap-2">
-                <Palette size={14} /> Post Color
-              </label>
-              <div className="flex gap-3 overflow-x-auto pb-2">
+              <label className="block text-xs font-black text-slate-400 uppercase tracking-widest mb-3">Card Color</label>
+              <div className="flex gap-3 overflow-x-auto pb-2 custom-scrollbar">
                 {WALL_COLORS.map(color => (
-                  <button
-                    key={color}
-                    onClick={() => setSelectedColor(color)}
-                    style={{ backgroundColor: color }}
-                    className={`h-10 w-10 rounded-full border-2 transition-all ${selectedColor === color ? 'border-cyan-600 scale-110 shadow-md' : 'border-black/10 hover:scale-105'}`}
-                  />
+                  <button key={color} onClick={() => setSelectedColor(color)} style={{ backgroundColor: color }} className={`h-10 w-10 shrink-0 rounded-full border-2 transition-all ${selectedColor === color ? 'border-cyan-600 scale-110 shadow-lg' : 'border-black/10 hover:border-black/20'}`} />
                 ))}
               </div>
             </div>
           </div>
         </div>
         
-        {safetyError && (
-          <div className="mx-6 mb-2 p-3 bg-red-50 border border-red-200 rounded-xl flex items-center gap-3">
-             <ShieldAlert className="text-red-500" size={20} />
-             <p className="text-sm text-red-700 font-medium leading-tight">{safetyError}</p>
-          </div>
-        )}
+        {safetyError && <div className="mx-6 mb-2 p-3 bg-red-50 border border-red-200 rounded-xl text-red-700 text-[10px] font-black uppercase tracking-tight flex gap-2 items-center"><ShieldAlert size={14} /> {safetyError}</div>}
 
-        <div className="p-6 border-t border-black/5 bg-white/50 backdrop-blur-sm flex justify-end">
-          <button
-            onClick={handleSubmit}
-            disabled={(!content && !url && !videoBase64) || isFetchingLink || isCheckingSafety}
-            className="flex items-center gap-2 px-8 py-3 bg-cyan-600 text-white rounded-xl font-bold hover:bg-cyan-700 disabled:opacity-50 shadow-lg active:scale-95"
-          >
-            {isCheckingSafety ? <Loader2 className="animate-spin" size={18} /> : (initialPost ? <><Save size={18} /> Update</> : <><Send size={18} /> Post</>)}
+        <div className="p-6 border-t border-black/5 bg-white/50 flex justify-end">
+          <button onClick={handleSubmit} disabled={isCheckingSafety} className="px-12 py-3 bg-cyan-600 text-white rounded-xl font-black uppercase tracking-widest text-xs shadow-lg hover:bg-cyan-700 disabled:opacity-50 transition-all active:scale-95 flex items-center gap-2">
+            {isCheckingSafety ? <><Loader2 className="animate-spin" size={16} /> Checking Safety...</> : 'Post to Wall'}
           </button>
         </div>
       </div>

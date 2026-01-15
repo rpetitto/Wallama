@@ -10,7 +10,7 @@ export interface User {
   isGuest?: boolean;
 }
 
-export type PostType = 'text' | 'image' | 'link' | 'gif' | 'video' | 'ai' | 'drive';
+export type PostType = 'title' | 'text' | 'image' | 'link' | 'gif' | 'video' | 'ai' | 'drive';
 
 export interface Post {
   id: string;

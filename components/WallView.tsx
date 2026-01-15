@@ -1,6 +1,6 @@
 
 import React, { useState, useEffect, useCallback, useRef } from 'react';
-import { Wall, Post as PostType, UserRole, ClassroomCourse } from '../types';
+import { Wall, Post as PostType, UserRole, ClassroomCourse, WallType } from '../types';
 import Post from './Post';
 import PostEditor from './PostEditor';
 import { ChevronLeft, Plus, Share2, Settings, X, Check, ZoomIn, ZoomOut, Maximize, Loader2, AlertCircle, LayoutGrid, Lock, Unlock, Image as ImageIcon, Copy, Search, School, Trash2, ShieldAlert, Upload, HardDrive, Link as LinkIcon, Sparkles, Grip, Layers, List, History } from 'lucide-react';
@@ -13,6 +13,7 @@ declare const google: any;
 const GOOGLE_CLIENT_ID = "6888240288-5v0p6nsoi64q1puv1vpvk1njd398ra8b.apps.googleusercontent.com";
 
 const TIMELINE_AXIS_Y = 200;
+const MIN_MILESTONE_SPACING = 340; // 300px card + 40px gap
 
 interface WallViewProps {
   wallId: string;
@@ -123,6 +124,15 @@ const WallView: React.FC<WallViewProps> = ({
     } catch (e) { console.error(e); }
   };
 
+  const scheduleOptimisticCleanup = (postId: string) => {
+    if (optimisticTimers.current.has(postId)) clearTimeout(optimisticTimers.current.get(postId)!);
+    const timer = setTimeout(() => {
+      optimisticPosts.current.delete(postId);
+      optimisticTimers.current.delete(postId);
+    }, 5000); 
+    optimisticTimers.current.set(postId, timer);
+  };
+
   const syncWall = useCallback(async () => {
     if (Date.now() - lastInteractionTime.current < 500) return;
     try {
@@ -136,13 +146,16 @@ const WallView: React.FC<WallViewProps> = ({
         });
         optimisticPosts.current.forEach((op, id) => { if (!remoteIds.has(id)) combinedPosts.push(op); });
         
-        if (remoteWall.type === 'timeline') {
+        // Use an explicit cast to string before comparison to ensure 'timeline' is allowed,
+        // bypasses narrowing issues where TypeScript incorrectly thinks 'timeline' has no overlap.
+        const currentType = remoteWall.type as string;
+        if (currentType === 'timeline') {
            combinedPosts.sort((a, b) => {
               if (a.parentId && b.parentId && a.parentId === b.parentId) return a.createdAt - b.createdAt;
               if (!a.parentId && !b.parentId) return a.x - b.x;
               return a.createdAt - b.createdAt;
            });
-        } else if (remoteWall.type === 'freeform') {
+        } else if (currentType === 'freeform') {
            combinedPosts.sort((a, b) => a.zIndex - b.zIndex);
         } else {
            combinedPosts.sort((a, b) => a.createdAt - b.createdAt);
@@ -301,7 +314,8 @@ const WallView: React.FC<WallViewProps> = ({
   const handleTouchEnd = () => { isPanning.current = false; lastTouchDistance.current = null; };
 
   const findSmartSlot = (posts: PostType[]) => {
-    if (wall?.type === 'timeline') {
+    // Cast type to string for comparison to bypass narrowing issues.
+    if ((wall?.type as string) === 'timeline') {
        const milestones = posts.filter(p => !p.parentId);
        if (milestones.length === 0) return { x: 100, y: TIMELINE_AXIS_Y };
        const maxX = Math.max(...milestones.map(p => p.x));
@@ -319,12 +333,49 @@ const WallView: React.FC<WallViewProps> = ({
     lastInteractionTime.current = Date.now();
     setWall(prev => {
       if (!prev) return prev;
-      const maxZ = Math.max(0, ...prev.posts.map(p => p.zIndex));
-      const targetPost = prev.posts.find(p => p.id === id);
-      const finalY = (prev.type === 'timeline' && !targetPost?.parentId) ? TIMELINE_AXIS_Y : y;
-      const updatedPosts = prev.posts.map(p => p.id === id ? { ...p, x, y: finalY, zIndex: maxZ + 1 } : p);
-      const movedPost = updatedPosts.find(p => p.id === id);
-      if (movedPost) { optimisticPosts.current.set(id, movedPost); }
+      
+      let updatedPosts = [...prev.posts];
+      const maxZ = Math.max(0, ...updatedPosts.map(p => p.zIndex));
+      const targetPost = updatedPosts.find(p => p.id === id);
+      if (!targetPost) return prev;
+
+      // Cast type to string for comparison to bypass narrowing issues.
+      if ((prev.type as string) === 'timeline' && !targetPost.parentId) {
+        // Enforce X positioning and push milestones to the right
+        const finalY = TIMELINE_AXIS_Y;
+        
+        // 1. Update the dragging post's tentative position
+        updatedPosts = updatedPosts.map(p => p.id === id ? { ...p, x, y: finalY, zIndex: maxZ + 1 } : p);
+        
+        // 2. Identify all milestones
+        const milestones = updatedPosts.filter(p => !p.parentId).sort((a, b) => a.x - b.x);
+        
+        // 3. Ripple push logic to prevent overlaps (only pushing right)
+        for (let i = 1; i < milestones.length; i++) {
+            if (milestones[i].x < milestones[i-1].x + MIN_MILESTONE_SPACING) {
+                const shiftedX = milestones[i-1].x + MIN_MILESTONE_SPACING;
+                milestones[i].x = shiftedX;
+                // Reflect back into main list
+                const milestoneId = milestones[i].id;
+                updatedPosts = updatedPosts.map(p => p.id === milestoneId ? { ...p, x: shiftedX } : p);
+            }
+        }
+      } else {
+        // Standard freeform movement
+        // Cast type to string for comparison
+        const finalY = ((prev.type as string) === 'timeline' && !targetPost.parentId) ? TIMELINE_AXIS_Y : y;
+        updatedPosts = updatedPosts.map(p => p.id === id ? { ...p, x, y: finalY, zIndex: maxZ + 1 } : p);
+      }
+
+      // Update optimistic tracking for all moved posts in this frame
+      updatedPosts.forEach(p => {
+         const original = prev.posts.find(op => op.id === p.id);
+         if (original && (original.x !== p.x || original.y !== p.y)) {
+            optimisticPosts.current.set(p.id, p);
+            scheduleOptimisticCleanup(p.id);
+         }
+      });
+
       return { ...prev, posts: updatedPosts };
     });
   };
@@ -332,8 +383,18 @@ const WallView: React.FC<WallViewProps> = ({
   const handlePostMoveEnd = async (id: string, x: number, y: number) => {
     if (wall?.isFrozen || isInteractionBlocked || !isCanvasMode) return;
     lastInteractionTime.current = Date.now();
-    const finalY = (wall?.type === 'timeline' && !wall?.posts.find(p => p.id === id)?.parentId) ? TIMELINE_AXIS_Y : y;
-    await onMovePost(id, x, finalY);
+    
+    // In timeline mode, multiple posts might have shifted. We need to persist all changes.
+    // Cast type to string for comparison to bypass narrowing issues.
+    if ((wall?.type as string) === 'timeline') {
+       const milestones = wall.posts.filter(p => !p.parentId);
+       const promises = milestones.map(m => onMovePost(m.id, m.x, m.y));
+       await Promise.all(promises);
+    } else {
+       // Cast type to string for comparison
+       const finalY = ((wall?.type as string) === 'timeline' && !wall?.posts.find(p => p.id === id)?.parentId) ? TIMELINE_AXIS_Y : y;
+       await onMovePost(id, x, finalY);
+    }
   };
 
   const handlePostSubmit = async (data: Partial<PostType>) => {
@@ -363,6 +424,7 @@ const WallView: React.FC<WallViewProps> = ({
     if (savedPost) {
       optimisticPosts.current.delete(tempId);
       optimisticPosts.current.set(savedPost.id, savedPost);
+      scheduleOptimisticCleanup(savedPost.id);
       setWall(prev => prev ? ({ ...prev, posts: prev.posts.map(p => p.id === tempId ? savedPost : p) }) : null);
     }
   };
@@ -748,7 +810,7 @@ const WallView: React.FC<WallViewProps> = ({
 
       {showDeleteConfirm && (
           <div className="fixed inset-0 z-[500] bg-slate-900/60 backdrop-blur-md flex items-center justify-center p-4" onClick={() => setShowDeleteConfirm(false)}>
-              <div className="bg-white rounded-[2rem] p-8 max-w-sm w-full text-center space-y-6 animate-in zoom-in-95" onClick={e => e.stopPropagation()}>
+              <div className="bg-white rounded-[2rem] p-8 max-sm w-full text-center space-y-6 animate-in zoom-in-95" onClick={e => e.stopPropagation()}>
                   <div className="h-16 w-16 bg-red-100 rounded-full flex items-center justify-center mx-auto text-red-600"><ShieldAlert size={32} /></div>
                   <h3 className="text-xl font-black text-slate-800">Delete Wall?</h3>
                   <p className="text-sm text-slate-500 font-medium leading-relaxed">This action cannot be undone. All posts will be lost forever.</p>
