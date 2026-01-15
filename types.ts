@@ -18,12 +18,13 @@ export interface Post {
   content: string;
   authorName: string;
   authorId: string;
-  authorAvatar?: string; // Capture user photo
+  authorAvatar?: string;
   createdAt: number;
   x: number;
   y: number;
   zIndex: number;
   color: string;
+  parentId?: string; // Reference to another post for attachments/replies
   metadata?: {
     url?: string;
     title?: string;
@@ -38,10 +39,12 @@ export interface Post {
 }
 
 export type PrivacyType = 'public' | 'private' | 'link' | 'domain';
+export type WallType = 'freeform' | 'wall' | 'stream' | 'timeline';
 
 export interface Wall {
   id: string;
   name: string;
+  type: WallType;
   joinCode: string;
   teacherId: string;
   posts: Post[];

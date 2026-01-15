@@ -3,7 +3,7 @@ import React, { useState, useEffect, useCallback, useRef } from 'react';
 import { Wall, Post as PostType, UserRole, ClassroomCourse } from '../types';
 import Post from './Post';
 import PostEditor from './PostEditor';
-import { ChevronLeft, Plus, Share2, Settings, X, Check, ZoomIn, ZoomOut, Maximize, Loader2, AlertCircle, LayoutGrid, Lock, Unlock, Image as ImageIcon, Copy, Search, School, Trash2, ShieldAlert, Upload, HardDrive, Link as LinkIcon, Sparkles } from 'lucide-react';
+import { ChevronLeft, Plus, Share2, Settings, X, Check, ZoomIn, ZoomOut, Maximize, Loader2, AlertCircle, LayoutGrid, Lock, Unlock, Image as ImageIcon, Copy, Search, School, Trash2, ShieldAlert, Upload, HardDrive, Link as LinkIcon, Sparkles, Grip, Layers, List, History } from 'lucide-react';
 import { WALL_GRADIENTS, POPULAR_EMOJIS } from '../constants';
 import { databaseService } from '../services/databaseService';
 import { classroomService } from '../services/classroomService';
@@ -11,6 +11,8 @@ import { GoogleGenAI } from "@google/genai";
 
 declare const google: any;
 const GOOGLE_CLIENT_ID = "6888240288-5v0p6nsoi64q1puv1vpvk1njd398ra8b.apps.googleusercontent.com";
+
+const TIMELINE_AXIS_Y = 200;
 
 interface WallViewProps {
   wallId: string;
@@ -31,6 +33,7 @@ const WallView: React.FC<WallViewProps> = ({
   const [wall, setWall] = useState<Wall | null>(null);
   const [showEditor, setShowEditor] = useState(false);
   const [editingPostId, setEditingPostId] = useState<string | null>(null);
+  const [activeParentId, setActiveParentId] = useState<string | null>(null);
   const [showSettings, setShowSettings] = useState(false);
   const [isSyncing, setIsSyncing] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -77,6 +80,9 @@ const WallView: React.FC<WallViewProps> = ({
   const lastTouchDistance = useRef<number | null>(null);
   const initialZoom = useRef<number>(1);
 
+  const isCanvasMode = wall?.type === 'freeform' || wall?.type === 'timeline';
+  const isInteractionBlocked = showEditor || showSettings || showShareOverlay || showClassroomModal || showDeleteConfirm;
+
   useEffect(() => {
     if (typeof google !== 'undefined' && google.accounts && google.accounts.oauth2) {
       driveTokenClient.current = google.accounts.oauth2.initTokenClient({
@@ -115,7 +121,7 @@ const WallView: React.FC<WallViewProps> = ({
   };
 
   const zoomFit = useCallback(() => {
-    if (!wall || wall.posts.length === 0) { setZoom(1); setPan({ x: 0, y: 0 }); return; }
+    if (!wall || wall.posts.length === 0 || !isCanvasMode) { setZoom(1); setPan({ x: 0, y: 0 }); return; }
     const padding = 100;
     const minX = Math.min(...wall.posts.map(p => p.x));
     const maxX = Math.max(...wall.posts.map(p => p.x + 300));
@@ -134,7 +140,7 @@ const WallView: React.FC<WallViewProps> = ({
       x: (containerWidth / 2) - ((minX + contentWidth / 2) * newZoom),
       y: (containerHeight / 2) - ((minY + contentHeight / 2) * newZoom)
     });
-  }, [wall]);
+  }, [wall, isCanvasMode]);
 
   const syncWall = useCallback(async () => {
     if (Date.now() - lastInteractionTime.current < 500) return;
@@ -148,7 +154,20 @@ const WallView: React.FC<WallViewProps> = ({
           else combinedPosts.push(rp);
         });
         optimisticPosts.current.forEach((op, id) => { if (!remoteIds.has(id)) combinedPosts.push(op); });
-        combinedPosts.sort((a, b) => a.zIndex - b.zIndex);
+        
+        // Timeline milestones use X for ordering, attachments use createdAt
+        if (remoteWall.type === 'timeline') {
+           combinedPosts.sort((a, b) => {
+              if (a.parentId && b.parentId && a.parentId === b.parentId) return a.createdAt - b.createdAt;
+              if (!a.parentId && !b.parentId) return a.x - b.x;
+              return a.createdAt - b.createdAt;
+           });
+        } else if (remoteWall.type === 'freeform') {
+           combinedPosts.sort((a, b) => a.zIndex - b.zIndex);
+        } else {
+           combinedPosts.sort((a, b) => a.createdAt - b.createdAt);
+        }
+        
         setWall({ ...remoteWall, posts: combinedPosts });
         setError(null);
       } else { setError("Wall not found."); }
@@ -156,10 +175,10 @@ const WallView: React.FC<WallViewProps> = ({
   }, [wallId]);
 
   useEffect(() => {
-    if (wall && wall.posts.length > 0 && !hasInitialZoomed.current) {
+    if (wall && wall.posts.length > 0 && isCanvasMode && !hasInitialZoomed.current) {
         setTimeout(() => { zoomFit(); hasInitialZoomed.current = true; }, 100);
     }
-  }, [wall, zoomFit]);
+  }, [wall, zoomFit, isCanvasMode]);
 
   useEffect(() => {
     syncWall();
@@ -171,14 +190,14 @@ const WallView: React.FC<WallViewProps> = ({
   const lastMousePos = useRef({ x: 0, y: 0 });
 
   const handleCanvasMouseDown = (e: React.MouseEvent) => {
-    if (isInteractionBlocked) return;
-    if ((e.target as HTMLElement).closest('.post-container, .modal-overlay')) return;
+    if (isInteractionBlocked || !isCanvasMode) return;
+    if ((e.target as HTMLElement).closest('.post-container, .modal-overlay, header, .fixed')) return;
     isPanning.current = true;
     lastMousePos.current = { x: e.clientX, y: e.clientY };
   };
 
   const handleCanvasMouseMove = (e: React.MouseEvent) => {
-    if (isInteractionBlocked) return;
+    if (isInteractionBlocked || !isCanvasMode) return;
     if (isPanning.current) {
       const dx = e.clientX - lastMousePos.current.x;
       const dy = e.clientY - lastMousePos.current.y;
@@ -190,6 +209,7 @@ const WallView: React.FC<WallViewProps> = ({
   const handleCanvasMouseUp = () => { isPanning.current = false; };
 
   const performZoomAtPoint = (newZoom: number, screenX: number, screenY: number) => {
+    if (!isCanvasMode) return;
     const el = containerRef.current;
     if (!el) return;
     const rect = el.getBoundingClientRect();
@@ -208,6 +228,7 @@ const WallView: React.FC<WallViewProps> = ({
   };
 
   const handleManualZoom = (direction: 1 | -1) => {
+    if (isInteractionBlocked || !isCanvasMode) return;
     const el = containerRef.current;
     if (!el) return;
     const rect = el.getBoundingClientRect();
@@ -219,7 +240,7 @@ const WallView: React.FC<WallViewProps> = ({
 
   useEffect(() => {
     const el = containerRef.current;
-    if (!el) return;
+    if (!el || !isCanvasMode) return;
     const handleWheelNative = (e: WheelEvent) => {
       if (isInteractionBlocked) return;
       e.preventDefault(); 
@@ -234,8 +255,8 @@ const WallView: React.FC<WallViewProps> = ({
         panRef.current = nextPan;
       }
     };
-    const handleGestureStartNative = (e: any) => { e.preventDefault(); startZoomRef.current = zoomRef.current; };
-    const handleGestureChangeNative = (e: any) => { e.preventDefault(); const nextZoom = Math.min(Math.max(startZoomRef.current * e.scale, 0.05), 5); performZoomAtPoint(nextZoom, e.clientX, e.clientY); };
+    const handleGestureStartNative = (e: any) => { if (isInteractionBlocked) return; e.preventDefault(); startZoomRef.current = zoomRef.current; };
+    const handleGestureChangeNative = (e: any) => { if (isInteractionBlocked) return; e.preventDefault(); const nextZoom = Math.min(Math.max(startZoomRef.current * e.scale, 0.05), 5); performZoomAtPoint(nextZoom, e.clientX, e.clientY); };
     el.addEventListener('wheel', handleWheelNative, { passive: false });
     el.addEventListener('gesturestart', handleGestureStartNative as any);
     el.addEventListener('gesturechange', handleGestureChangeNative as any);
@@ -244,11 +265,11 @@ const WallView: React.FC<WallViewProps> = ({
       el.removeEventListener('gesturestart', handleGestureStartNative as any);
       el.removeEventListener('gesturechange', handleGestureChangeNative as any);
     };
-  }, [showEditor, showSettings]); // Re-bind if blocking state changes
+  }, [isInteractionBlocked, wall?.type, isCanvasMode]); 
 
   const handleTouchStart = (e: React.TouchEvent) => {
-    if (isInteractionBlocked) return;
-    if (e.touches.length === 1 && !(e.target as HTMLElement).closest('.post-container, .modal-overlay')) {
+    if (isInteractionBlocked || !isCanvasMode) return;
+    if (e.touches.length === 1 && !(e.target as HTMLElement).closest('.post-container, .modal-overlay, header, .fixed')) {
       isPanning.current = true;
       lastMousePos.current = { x: e.touches[0].clientX, y: e.touches[0].clientY };
     } else if (e.touches.length === 2) {
@@ -258,7 +279,7 @@ const WallView: React.FC<WallViewProps> = ({
   };
 
   const handleTouchMove = (e: React.TouchEvent) => {
-    if (isInteractionBlocked) return;
+    if (isInteractionBlocked || !isCanvasMode) return;
     if (e.touches.length > 1) e.preventDefault();
     if (e.touches.length === 1 && isPanning.current) {
       const dx = e.touches[0].clientX - lastMousePos.current.x;
@@ -278,6 +299,12 @@ const WallView: React.FC<WallViewProps> = ({
   const handleTouchEnd = () => { isPanning.current = false; lastTouchDistance.current = null; };
 
   const findSmartSlot = (posts: PostType[]) => {
+    if (wall?.type === 'timeline') {
+       const milestones = posts.filter(p => !p.parentId);
+       if (milestones.length === 0) return { x: 100, y: TIMELINE_AXIS_Y };
+       const maxX = Math.max(...milestones.map(p => p.x));
+       return { x: maxX + 350, y: TIMELINE_AXIS_Y };
+    }
     if (posts.length === 0) return { x: 100, y: 100 };
     const minX = Math.min(...posts.map(p => p.x)), maxX = Math.max(...posts.map(p => p.x + 300));
     const minY = Math.min(...posts.map(p => p.y)), maxY = Math.max(...posts.map(p => p.y + 250));
@@ -286,12 +313,14 @@ const WallView: React.FC<WallViewProps> = ({
   };
 
   const handlePostMove = (id: string, x: number, y: number) => {
-    if (wall?.isFrozen || isInteractionBlocked) return;
+    if (wall?.isFrozen || isInteractionBlocked || !isCanvasMode) return;
     lastInteractionTime.current = Date.now();
     setWall(prev => {
       if (!prev) return prev;
       const maxZ = Math.max(0, ...prev.posts.map(p => p.zIndex));
-      const updatedPosts = prev.posts.map(p => p.id === id ? { ...p, x, y, zIndex: maxZ + 1 } : p);
+      // Lock Y if timeline milestone
+      const finalY = (prev.type === 'timeline' && !prev.posts.find(p => p.id === id)?.parentId) ? TIMELINE_AXIS_Y : y;
+      const updatedPosts = prev.posts.map(p => p.id === id ? { ...p, x, y: finalY, zIndex: maxZ + 1 } : p);
       const movedPost = updatedPosts.find(p => p.id === id);
       if (movedPost) { optimisticPosts.current.set(id, movedPost); scheduleOptimisticCleanup(id); }
       return { ...prev, posts: updatedPosts };
@@ -299,9 +328,10 @@ const WallView: React.FC<WallViewProps> = ({
   };
 
   const handlePostMoveEnd = async (id: string, x: number, y: number) => {
-    if (wall?.isFrozen || isInteractionBlocked) return;
+    if (wall?.isFrozen || isInteractionBlocked || !isCanvasMode) return;
     lastInteractionTime.current = Date.now();
-    await onMovePost(id, x, y);
+    const finalY = (wall?.type === 'timeline' && !wall?.posts.find(p => p.id === id)?.parentId) ? TIMELINE_AXIS_Y : y;
+    await onMovePost(id, x, finalY);
   };
 
   const handlePostSubmit = async (data: Partial<PostType>) => {
@@ -313,18 +343,20 @@ const WallView: React.FC<WallViewProps> = ({
         setEditingPostId(null); setShowEditor(false);
         return;
     }
-    const slot = findSmartSlot(wall?.posts || []);
+    const slot = isCanvasMode ? findSmartSlot(wall?.posts || []) : { x: 0, y: 0 };
     const tempId = 'temp_' + Date.now();
     const optimisticPost: PostType = {
       id: tempId, type: data.type || 'text', content: data.content || '',
       authorName, authorId: currentUserId, createdAt: Date.now(), x: slot.x, y: slot.y,
       zIndex: Math.max(0, ...(wall?.posts.map(p => p.zIndex) || [])) + 1,
-      color: data.color || 'bg-white', metadata: data.metadata
+      color: data.color || 'bg-white', metadata: data.metadata,
+      parentId: data.parentId
     };
     optimisticPosts.current.set(tempId, optimisticPost);
     lastInteractionTime.current = Date.now();
     setWall(prev => prev ? ({ ...prev, posts: [...prev.posts, optimisticPost] }) : null);
     setShowEditor(false);
+    setActiveParentId(null);
     const savedPost = await onAddPost({ ...data, x: slot.x, y: slot.y });
     if (savedPost) {
       optimisticPosts.current.delete(tempId);
@@ -338,6 +370,12 @@ const WallView: React.FC<WallViewProps> = ({
   const handleOpenSettings = () => { if (wall) setSettingsForm({ ...wall }); setShowSettings(true); setShowEmojiPicker(false); setEmojiSearch(''); };
   const handleSaveSettings = () => { lastInteractionTime.current = Date.now() + 10000; onUpdateWall(settingsForm); if (wall) setWall({ ...wall, ...settingsForm }); setShowSettings(false); };
   
+  const handleAddDetail = (parentId: string) => {
+    setActiveParentId(parentId);
+    setEditingPostId(null);
+    setShowEditor(true);
+  };
+
   const handleBgUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (file) {
@@ -354,10 +392,10 @@ const WallView: React.FC<WallViewProps> = ({
         const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
         const response = await ai.models.generateContent({
             model: 'gemini-3-flash-preview',
-            contents: `Find a high-quality, professional, and educational wallpaper image URL related to "${bgSearch}". Return ONLY the URL string.`,
+            contents: `Search Google to find a high-quality, professional, direct image URL (ending in .jpg, .png, etc.) for a background related to "${bgSearch}". Return ONLY the raw direct image URL string, no markdown, no other text. Ensure the URL is publicly accessible.`,
             config: { tools: [{ googleSearch: {} }] }
         });
-        const url = response.text.trim();
+        const url = response.text.trim().replace(/`/g, '');
         if (url.startsWith('http')) {
             setSettingsForm({ ...settingsForm, background: url });
         }
@@ -402,8 +440,6 @@ const WallView: React.FC<WallViewProps> = ({
     setIsSyncing(false);
   };
 
-  const isInteractionBlocked = showEditor || showSettings || showShareOverlay || showClassroomModal || showDeleteConfirm;
-
   if (error) return <div className="min-h-screen flex items-center justify-center bg-slate-50 p-6 text-center"><AlertCircle className="mx-auto text-red-500 mb-4" size={48} /><h2 className="text-2xl font-bold">{error}</h2><button onClick={onBack} className="mt-4 px-6 py-2 bg-cyan-600 text-white rounded-xl">Back</button></div>;
   if (isSyncing && !wall) return <div className="min-h-screen flex items-center justify-center"><Loader2 className="animate-spin text-cyan-600" size={40} /></div>;
   if (!wall) return null;
@@ -415,6 +451,13 @@ const WallView: React.FC<WallViewProps> = ({
   const backgroundStyle = wall.background.startsWith('http') || wall.background.startsWith('data:') 
     ? { backgroundImage: `url(${wall.background})`, backgroundSize: 'cover', backgroundPosition: 'center', backgroundAttachment: 'fixed' }
     : { background: wall.background.includes('from-') ? undefined : wall.background };
+
+  // Helper for universal image preview in settings tabs
+  const isImageBackground = (settingsForm.background?.startsWith('http') || settingsForm.background?.startsWith('data:image')) && !WALL_GRADIENTS.includes(settingsForm.background!);
+
+  // Grouping logic for Timeline / Hierarchical layouts
+  const milestones = wall.posts.filter(p => !p.parentId);
+  const getAttachments = (parentId: string) => wall.posts.filter(p => p.parentId === parentId);
 
   return (
     <div 
@@ -429,55 +472,122 @@ const WallView: React.FC<WallViewProps> = ({
       onTouchMove={handleTouchMove}
       onTouchEnd={handleTouchEnd}
     >
-      <header className="relative z-[100] bg-white/20 backdrop-blur-xl border-b border-white/20 px-6 py-4 flex items-center justify-between">
+      <header className="relative z-[100] bg-white/80 backdrop-blur-xl border-b border-slate-200/50 px-6 py-4 flex items-center justify-between">
         <div className="flex items-center gap-4">
-          <button onClick={onBack} className="p-2 hover:bg-white/20 rounded-xl text-white transition-colors"><ChevronLeft size={24} /></button>
+          <button onClick={onBack} className="p-2 hover:bg-slate-100 rounded-xl text-slate-500 transition-colors"><ChevronLeft size={24} /></button>
           <div className="flex items-center gap-3">
-             <div className="h-10 w-10 bg-white/30 backdrop-blur-md rounded-xl flex items-center justify-center text-xl shadow-sm border border-white/20">{wall.icon || '📝'}</div>
+             <div className="h-10 w-10 bg-white/30 backdrop-blur-md rounded-xl flex items-center justify-center text-xl shadow-sm border border-slate-200/50">{wall.icon || '📝'}</div>
              <div>
                 <div className="flex items-center gap-2">
-                    <h2 className="text-xl font-extrabold text-white drop-shadow-md leading-tight">{wall.name}</h2>
-                    {wall.isFrozen && <div className="px-2 py-0.5 bg-indigo-600/60 backdrop-blur-md rounded-full flex items-center gap-1 border border-white/20"><Lock size={10} className="text-white"/><span className="text-[10px] font-black text-white uppercase tracking-wider">Frozen</span></div>}
+                    <h2 className="text-xl font-extrabold text-slate-800 drop-shadow-sm leading-tight">{wall.name}</h2>
+                    <div className="flex items-center gap-2">
+                      <span className="text-[9px] font-black text-slate-400 uppercase tracking-widest bg-slate-100 px-1.5 py-0.5 rounded flex items-center gap-1">
+                        {wall.type === 'freeform' && <Grip size={8} />}
+                        {wall.type === 'wall' && <Layers size={8} />}
+                        {wall.type === 'stream' && <List size={8} />}
+                        {wall.type === 'timeline' && <History size={8} />}
+                        {wall.type}
+                      </span>
+                      {wall.isFrozen && <div className="px-2 py-0.5 bg-indigo-600/10 backdrop-blur-md rounded-full flex items-center gap-1 border border-indigo-200/50"><Lock size={10} className="text-indigo-600"/><span className="text-[10px] font-black text-indigo-600 uppercase tracking-wider">Frozen</span></div>}
+                    </div>
                 </div>
-                <p className="text-[10px] text-white/70 font-bold uppercase tracking-widest">Code: {wall.joinCode}</p>
+                <p className="text-[10px] text-slate-500 font-bold uppercase tracking-widest">Code: {wall.joinCode}</p>
              </div>
           </div>
         </div>
         <div className="flex items-center gap-3">
-          <button onClick={handleShare} className="p-2.5 bg-white/20 hover:bg-white/30 text-white rounded-full backdrop-blur-md border border-white/20 transition-all"><Share2 size={20} /></button>
-          {isTeacher && <button onClick={handleOpenSettings} className="p-2.5 bg-white/20 text-white rounded-full border border-white/20 hover:bg-white/30 transition-all"><Settings size={20} /></button>}
+          <button onClick={handleShare} className="p-2.5 bg-slate-100 hover:bg-slate-200 text-slate-600 rounded-full border border-slate-200/50 transition-all"><Share2 size={20} /></button>
+          {isTeacher && <button onClick={handleOpenSettings} className="p-2.5 bg-slate-100 text-slate-600 rounded-full border border-slate-200/50 hover:bg-slate-200 transition-all"><Settings size={20} /></button>}
         </div>
       </header>
 
-      <main id="canvas-root" className={`flex-1 relative overflow-hidden ${wall.isFrozen || isInteractionBlocked ? 'cursor-default pointer-events-none' : 'cursor-grab active:cursor-grabbing'}`}>
-        <div 
-          className="absolute origin-top-left transition-transform duration-75"
-          style={{ transform: `translate(${pan.x}px, ${pan.y}px) scale(${zoom})` }}
-        >
-          <div className="relative w-[10000px] h-[10000px]">
+      <main id="canvas-root" className={`flex-1 relative ${isCanvasMode ? 'overflow-hidden' : 'overflow-y-auto custom-scrollbar p-10 pb-40'} ${wall.isFrozen || isInteractionBlocked ? 'cursor-default pointer-events-none' : (isCanvasMode ? 'cursor-grab active:cursor-grabbing' : '')}`}>
+        {isCanvasMode ? (
+           <div 
+             className="absolute origin-top-left transition-transform duration-75"
+             style={{ transform: `translate(${pan.x}px, ${pan.y}px) scale(${zoom})` }}
+           >
+             <div className="relative w-[10000px] h-[10000px]">
+               {/* Timeline Axis Line */}
+               {wall.type === 'timeline' && (
+                  <div className="absolute top-[242px] left-0 right-0 h-1.5 bg-white/30 shadow-sm z-0 pointer-events-none" />
+               )}
+
+               {wall.type === 'timeline' ? (
+                  milestones.map(milestone => (
+                    <Post 
+                      key={milestone.id} post={milestone} zoom={zoom}
+                      onDelete={(id) => { setWall(prev => prev ? ({ ...prev, posts: prev.posts.filter(p => p.id !== id) }) : null); onDeletePost(id); }} 
+                      onEdit={handleEditClick} onMove={handlePostMove} onMoveEnd={handlePostMoveEnd}
+                      onAddDetail={handleAddDetail}
+                      isOwner={milestone.authorId === currentUserId || isTeacher} 
+                      snapToGrid={wall.snapToGrid} isWallAnonymous={wall.isAnonymous} isWallFrozen={wall.isFrozen}
+                      isTimelineMilestone={true}
+                    >
+                      {getAttachments(milestone.id).map(attachment => (
+                        <div key={attachment.id} className="scale-90 opacity-90 hover:opacity-100 hover:scale-95 transition-all">
+                          <Post 
+                            post={{...attachment, x: 0, y: 0}} zoom={1}
+                            onDelete={(id) => { setWall(prev => prev ? ({ ...prev, posts: prev.posts.filter(p => p.id !== id) }) : null); onDeletePost(id); }} 
+                            onEdit={handleEditClick} onMove={() => {}} onMoveEnd={() => {}}
+                            isOwner={attachment.authorId === currentUserId || isTeacher} 
+                            snapToGrid={false} isWallAnonymous={wall.isAnonymous} isWallFrozen={wall.isFrozen}
+                          />
+                        </div>
+                      ))}
+                    </Post>
+                  ))
+               ) : (
+                  wall.posts.map(post => (
+                    <Post 
+                      key={post.id} post={post} zoom={zoom}
+                      onDelete={(id) => { setWall(prev => prev ? ({ ...prev, posts: prev.posts.filter(p => p.id !== id) }) : null); onDeletePost(id); }} 
+                      onEdit={handleEditClick} onMove={handlePostMove} onMoveEnd={handlePostMoveEnd}
+                      isOwner={post.authorId === currentUserId || isTeacher} 
+                      snapToGrid={wall.snapToGrid} isWallAnonymous={wall.isAnonymous} isWallFrozen={wall.isFrozen}
+                    />
+                  ))
+               )}
+             </div>
+           </div>
+        ) : (
+          <div className={wall.type === 'wall' ? "max-w-7xl mx-auto columns-1 sm:columns-2 lg:columns-3 gap-6 space-y-6" : "max-w-3xl mx-auto space-y-6"}>
             {wall.posts.map(post => (
-              <Post 
-                key={post.id} post={post} zoom={zoom}
-                onDelete={(id) => { setWall(prev => prev ? ({ ...prev, posts: prev.posts.filter(p => p.id !== id) }) : null); onDeletePost(id); }} 
-                onEdit={handleEditClick} onMove={handlePostMove} onMoveEnd={handlePostMoveEnd}
-                isOwner={post.authorId === currentUserId || isTeacher} 
-                snapToGrid={wall.snapToGrid} isWallAnonymous={wall.isAnonymous} isWallFrozen={wall.isFrozen}
-              />
+              <div key={post.id} className="break-inside-avoid">
+                <Post 
+                  post={{...post, x: 0, y: 0}} zoom={1}
+                  onDelete={(id) => { setWall(prev => prev ? ({ ...prev, posts: prev.posts.filter(p => p.id !== id) }) : null); onDeletePost(id); }} 
+                  onEdit={handleEditClick} onMove={() => {}} onMoveEnd={() => {}}
+                  isOwner={post.authorId === currentUserId || isTeacher} 
+                  snapToGrid={false} isWallAnonymous={wall.isAnonymous} isWallFrozen={wall.isFrozen}
+                />
+              </div>
             ))}
+            {wall.posts.length === 0 && (
+               <div className="py-20 text-center bg-white/30 backdrop-blur-md rounded-[2.5rem] border border-white/20">
+                  <div className="h-20 w-20 bg-white/50 rounded-full flex items-center justify-center mx-auto mb-4">
+                     <Plus className="text-slate-400" size={40} />
+                  </div>
+                  <h4 className="text-slate-800 font-bold text-xl">This wall is empty</h4>
+                  <p className="text-slate-600">Be the first to add something!</p>
+               </div>
+            )}
           </div>
-        </div>
+        )}
       </main>
 
-      <div className={`fixed bottom-10 left-10 z-[100] bg-white/90 backdrop-blur-md p-2 rounded-2xl shadow-2xl flex items-center gap-2 border border-slate-200 transition-opacity ${isInteractionBlocked ? 'opacity-50 pointer-events-none' : 'opacity-100'}`}>
-        <button onClick={() => handleManualZoom(-1)} className="p-2 hover:bg-slate-100 rounded-lg text-slate-600"><ZoomOut size={20} /></button>
-        <span className="text-[10px] font-black text-slate-400 w-12 text-center">{Math.round(zoom * 100)}%</span>
-        <button onClick={() => handleManualZoom(1)} className="p-2 hover:bg-slate-100 rounded-lg text-slate-600"><ZoomIn size={20} /></button>
-        <div className="w-px h-6 bg-slate-200 mx-1" />
-        <button onClick={zoomFit} className="p-2 hover:bg-slate-100 rounded-lg text-slate-600 flex items-center gap-2 font-bold text-xs"><Maximize size={18} /> Fit</button>
-      </div>
+      {isCanvasMode && (
+        <div className={`fixed bottom-10 left-10 z-[100] bg-white/90 backdrop-blur-md p-2 rounded-2xl shadow-2xl flex items-center gap-2 border border-slate-200 transition-opacity ${isInteractionBlocked ? 'opacity-50 pointer-events-none' : 'opacity-100'}`}>
+          <button onClick={() => handleManualZoom(-1)} className="p-2 hover:bg-slate-100 rounded-lg text-slate-600"><ZoomOut size={20} /></button>
+          <span className="text-[10px] font-black text-slate-600 w-12 text-center">{Math.round(zoom * 100)}%</span>
+          <button onClick={() => handleManualZoom(1)} className="p-2 hover:bg-slate-100 rounded-lg text-slate-600"><ZoomIn size={20} /></button>
+          <div className="w-px h-6 bg-slate-200 mx-1" />
+          <button onClick={zoomFit} className="p-2 hover:bg-slate-100 rounded-lg text-slate-600 flex items-center gap-2 font-bold text-xs"><Maximize size={18} /> Fit</button>
+        </div>
+      )}
 
       {!wall.isFrozen && (
-        <button onClick={() => { setEditingPostId(null); setShowEditor(true); }} className={`fixed bottom-10 right-10 z-[100] h-20 w-20 bg-cyan-600 text-white rounded-full shadow-2xl hover:scale-110 flex items-center justify-center border-4 border-white/20 active:scale-95 transition-all ${isInteractionBlocked ? 'opacity-0 pointer-events-none scale-50' : 'opacity-100'}`}>
+        <button onClick={() => { setEditingPostId(null); setActiveParentId(null); setShowEditor(true); }} className={`fixed bottom-10 right-10 z-[100] h-20 w-20 bg-cyan-600 text-white rounded-full shadow-2xl hover:scale-110 flex items-center justify-center border-4 border-white/20 active:scale-95 transition-all ${isInteractionBlocked ? 'opacity-0 pointer-events-none scale-50' : 'opacity-100'}`}>
             <Plus size={40} />
         </button>
       )}
@@ -494,7 +604,7 @@ const WallView: React.FC<WallViewProps> = ({
             <div className="flex-1 overflow-y-auto custom-scrollbar p-6 space-y-8">
               {/* Identity Section */}
               <section className="space-y-4">
-                <h4 className="text-xs font-black text-slate-400 uppercase tracking-widest flex items-center gap-2"><ImageIcon size={14} /> Identity</h4>
+                <h4 className="text-xs font-black text-slate-600 uppercase tracking-widest flex items-center gap-2"><ImageIcon size={14} /> Identity</h4>
                 <div className="grid grid-cols-[auto_1fr] gap-4">
                     <div className="space-y-2">
                         <label className="text-xs font-bold text-slate-500 ml-1">Icon</label>
@@ -502,7 +612,7 @@ const WallView: React.FC<WallViewProps> = ({
                             <button onClick={() => setShowEmojiPicker(!showEmojiPicker)} className="h-16 w-16 bg-slate-100 rounded-2xl flex items-center justify-center text-4xl border border-slate-200 hover:bg-slate-200 transition-colors">{settingsForm.icon || '📝'}</button>
                             {showEmojiPicker && (
                                 <div className="absolute top-full mt-2 left-0 z-50 bg-white rounded-2xl shadow-xl border border-slate-100 p-4 w-72 h-80 flex flex-col">
-                                    <input type="text" placeholder="Search..." value={emojiSearch} onChange={(e) => setEmojiSearch(e.target.value)} className="w-full px-4 py-2 bg-slate-50 rounded-lg text-sm mb-2 outline-none" />
+                                    <input type="text" placeholder="Search..." value={emojiSearch} onChange={(e) => setEmojiSearch(e.target.value)} className="w-full px-4 py-2 bg-slate-50 rounded-lg text-sm mb-2 outline-none text-slate-800" />
                                     <div className="flex-1 overflow-y-auto custom-scrollbar grid grid-cols-5 gap-2 content-start">
                                         {filteredEmojis.map((emoji, idx) => <button key={idx} onClick={() => { setSettingsForm({...settingsForm, icon: emoji}); setShowEmojiPicker(false); }} className="h-10 w-10 flex items-center justify-center rounded-lg hover:bg-slate-100 text-xl">{emoji}</button>)}
                                     </div>
@@ -511,15 +621,15 @@ const WallView: React.FC<WallViewProps> = ({
                         </div>
                     </div>
                     <div className="space-y-3">
-                         <input type="text" className="w-full px-4 py-3 bg-slate-50 border border-slate-200 rounded-xl font-bold" value={settingsForm.name || ''} onChange={(e) => setSettingsForm({...settingsForm, name: e.target.value})} placeholder="Wall Name" />
-                         <input type="text" className="w-full px-4 py-3 bg-slate-50 border border-slate-200 rounded-xl text-slate-600" value={settingsForm.description || ''} onChange={(e) => setSettingsForm({...settingsForm, description: e.target.value})} placeholder="Description" />
+                         <input type="text" className="w-full px-4 py-3 bg-slate-50 border border-slate-200 rounded-xl font-bold text-slate-800" value={settingsForm.name || ''} onChange={(e) => setSettingsForm({...settingsForm, name: e.target.value})} placeholder="Wall Name" />
+                         <textarea className="w-full px-4 py-3 bg-slate-50 border border-slate-200 rounded-xl text-slate-600 resize-none h-20" value={settingsForm.description || ''} onChange={(e) => setSettingsForm({...settingsForm, description: e.target.value})} placeholder="Description" />
                     </div>
                 </div>
               </section>
 
               {/* Appearance Section */}
               <section className="space-y-4">
-                <h4 className="text-xs font-black text-slate-400 uppercase tracking-widest flex items-center gap-2"><LayoutGrid size={14} /> Background</h4>
+                <h4 className="text-xs font-black text-slate-600 uppercase tracking-widest flex items-center gap-2"><LayoutGrid size={14} /> Background</h4>
                 
                 <div className="flex gap-2 p-1 bg-slate-100 rounded-xl overflow-x-auto">
                     {[
@@ -529,7 +639,7 @@ const WallView: React.FC<WallViewProps> = ({
                         { id: 'url', icon: LinkIcon, label: 'URL' },
                         { id: 'search', icon: Sparkles, label: 'Search' }
                     ].map(tab => (
-                        <button key={tab.id} onClick={() => setBgPickerTab(tab.id as any)} className={`flex-1 py-2 px-3 rounded-lg flex items-center justify-center gap-2 text-[10px] font-black uppercase tracking-widest transition-all ${bgPickerTab === tab.id ? 'bg-white shadow-sm text-cyan-600' : 'text-slate-400 hover:bg-white/50'}`}>
+                        <button key={tab.id} onClick={() => setBgPickerTab(tab.id as any)} className={`flex-1 py-2 px-3 rounded-lg flex items-center justify-center gap-2 text-[10px] font-black uppercase tracking-widest transition-all ${bgPickerTab === tab.id ? 'bg-white shadow-sm text-cyan-600' : 'text-slate-500 hover:bg-white/50'}`}>
                             <tab.icon size={14} /> {tab.label}
                         </button>
                     ))}
@@ -544,10 +654,21 @@ const WallView: React.FC<WallViewProps> = ({
                         </div>
                     )}
                     {bgPickerTab === 'upload' && (
-                        <div className="flex flex-col items-center justify-center h-full gap-3 py-4">
-                            <Upload className="text-slate-300" size={32} />
-                            <p className="text-xs font-bold text-slate-500">Upload a custom wallpaper</p>
-                            <button onClick={() => bgInputRef.current?.click()} className="px-6 py-2 bg-slate-800 text-white rounded-lg text-xs font-bold">Choose File</button>
+                        <div className="flex flex-col items-center justify-center h-full gap-3 py-4 text-center">
+                            {isImageBackground ? (
+                                <div className="space-y-3">
+                                    <img src={settingsForm.background} className="h-24 w-40 object-cover rounded-xl border-4 border-white shadow-md mx-auto" alt="Preview" />
+                                    <p className="text-[10px] font-black text-cyan-600 uppercase tracking-widest">Image Set</p>
+                                </div>
+                            ) : (
+                                <>
+                                    <Upload className="text-slate-300" size={32} />
+                                    <p className="text-xs font-bold text-slate-500">Upload a custom wallpaper</p>
+                                </>
+                            )}
+                            <button onClick={() => bgInputRef.current?.click()} className="px-6 py-2 bg-slate-800 text-white rounded-lg text-xs font-bold hover:bg-slate-900 transition-colors">
+                                {isImageBackground ? 'Change File' : 'Choose File'}
+                            </button>
                             <input ref={bgInputRef} type="file" accept="image/*" className="hidden" onChange={handleBgUpload} />
                         </div>
                     )}
@@ -559,12 +680,16 @@ const WallView: React.FC<WallViewProps> = ({
                                 </div>
                             ) : (
                                 <div className="grid grid-cols-4 gap-2 h-32 overflow-y-auto custom-scrollbar pr-2">
-                                    {driveFiles.map(file => (
-                                        <button key={file.id} onClick={() => setSettingsForm({ ...settingsForm, background: file.webViewLink })} className="relative aspect-square bg-white rounded-lg overflow-hidden border border-slate-200 group">
-                                            <img src={file.thumbnailLink} className="w-full h-full object-cover" alt="" referrerPolicy="no-referrer" />
-                                            {settingsForm.background === file.webViewLink && <div className="absolute inset-0 bg-cyan-600/40 flex items-center justify-center"><Check className="text-white" size={20} /></div>}
-                                        </button>
-                                    ))}
+                                    {driveFiles.map(file => {
+                                        const directLink = file.thumbnailLink?.replace(/=s\d+$/, '=s0');
+                                        const wallLink = directLink || file.webViewLink;
+                                        return (
+                                            <button key={file.id} onClick={() => setSettingsForm({ ...settingsForm, background: wallLink })} className="relative aspect-square bg-white rounded-lg overflow-hidden border border-slate-200 group">
+                                                <img src={file.thumbnailLink} className="w-full h-full object-cover" alt="" referrerPolicy="no-referrer" />
+                                                {settingsForm.background === wallLink && <div className="absolute inset-0 bg-cyan-600/40 flex items-center justify-center"><Check className="text-white" size={20} /></div>}
+                                            </button>
+                                        );
+                                    })}
                                 </div>
                             )}
                         </div>
@@ -572,23 +697,32 @@ const WallView: React.FC<WallViewProps> = ({
                     {bgPickerTab === 'url' && (
                         <div className="space-y-4 py-4">
                             <div className="flex gap-2">
-                                <input type="text" placeholder="https://image-url.com/wallpaper.jpg" className="flex-1 px-4 py-2 bg-white border rounded-xl text-xs" value={bgUrlInput} onChange={e => setBgUrlInput(e.target.value)} />
-                                <button onClick={() => setSettingsForm({ ...settingsForm, background: bgUrlInput })} className="px-4 py-2 bg-slate-800 text-white rounded-xl text-xs font-bold">Apply</button>
+                                <input type="text" placeholder="https://image-url.com/wallpaper.jpg" className="flex-1 px-4 py-3 bg-white border border-slate-200 rounded-xl text-xs text-slate-800 outline-none focus:ring-2 focus:ring-cyan-500/20" value={bgUrlInput} onChange={e => setBgUrlInput(e.target.value)} />
+                                <button onClick={() => { setSettingsForm({ ...settingsForm, background: bgUrlInput }); setBgUrlInput(''); }} className="px-4 py-2 bg-slate-800 text-white rounded-xl text-xs font-bold">Apply</button>
                             </div>
+                            {isImageBackground && (
+                                <div className="text-center space-y-2">
+                                    <img src={settingsForm.background} className="h-16 w-28 object-cover rounded-lg mx-auto border" alt="Preview" />
+                                    <p className="text-[10px] font-black text-cyan-600 uppercase tracking-widest">URL Background Active</p>
+                                </div>
+                            )}
                         </div>
                     )}
                     {bgPickerTab === 'search' && (
                         <div className="space-y-4 py-4 text-center">
                             <div className="flex gap-2">
                                 <div className="relative flex-1">
-                                    <input type="text" placeholder="Space, Nature, Art..." className="w-full px-4 py-2 pl-9 bg-white border rounded-xl text-xs" value={bgSearch} onChange={e => setBgSearch(e.target.value)} />
-                                    <Search className="absolute left-3 top-2.5 text-slate-400" size={14} />
+                                    <input type="text" placeholder="Space, Nature, Art..." className="w-full px-4 py-3 pl-10 bg-white border border-slate-200 rounded-xl text-xs text-slate-800 outline-none focus:ring-2 focus:ring-cyan-500/20" value={bgSearch} onChange={e => setBgSearch(e.target.value)} onKeyDown={e => e.key === 'Enter' && performBgSearch()} />
+                                    <Search className="absolute left-3.5 top-3.5 text-slate-400" size={14} />
                                 </div>
                                 <button onClick={performBgSearch} disabled={isBgSearching} className="px-6 py-2 bg-indigo-600 text-white rounded-xl text-xs font-bold disabled:opacity-50">
                                     {isBgSearching ? <Loader2 className="animate-spin" size={14} /> : 'Search'}
                                 </button>
                             </div>
-                            <p className="text-[10px] text-slate-400 font-bold uppercase tracking-widest">Uses Gemini to find the perfect background</p>
+                            <p className="text-[10px] text-slate-500 font-bold uppercase tracking-widest">Uses Gemini to find the perfect background</p>
+                            {isImageBackground && !settingsForm.background?.includes('data:image') && (
+                                <img src={settingsForm.background} className="h-12 w-20 object-cover rounded-lg mx-auto border" alt="Search Result Preview" />
+                            )}
                         </div>
                     )}
                 </div>
@@ -596,20 +730,23 @@ const WallView: React.FC<WallViewProps> = ({
 
               {/* Controls Section */}
               <section className="space-y-4">
-                <h4 className="text-xs font-black text-slate-400 uppercase tracking-widest flex items-center gap-2"><Lock size={14} /> Access Control</h4>
+                <h4 className="text-xs font-black text-slate-600 uppercase tracking-widest flex items-center gap-2"><Lock size={14} /> Access Control</h4>
                 <div className="flex items-center justify-between p-4 bg-slate-50 rounded-2xl border border-slate-100">
-                    <div className="flex flex-col"><span className="font-bold text-slate-700">Freeze Wall</span><span className="text-xs text-slate-500">Stop all changes</span></div>
+                    <div className="flex flex-col"><span className="font-bold text-slate-800">Freeze Wall</span><span className="text-xs text-slate-500">Stop all changes</span></div>
                     <button onClick={() => setSettingsForm({ ...settingsForm, isFrozen: !settingsForm.isFrozen })} className={`w-12 h-6 rounded-full relative transition-colors ${settingsForm.isFrozen ? 'bg-indigo-600' : 'bg-slate-300'}`}><div className={`absolute top-1 w-4 h-4 bg-white rounded-full transition-all ${settingsForm.isFrozen ? 'left-7' : 'left-1'}`} /></button>
                 </div>
                 <div className="flex items-center justify-between p-4 bg-slate-50 rounded-2xl border border-slate-100">
-                    <div className="flex flex-col"><span className="font-bold text-slate-700">Anonymous Posting</span><span className="text-xs text-slate-500">Hide names</span></div>
+                    <div className="flex flex-col"><span className="font-bold text-slate-800">Anonymous Posting</span><span className="text-xs text-slate-500">Hide names</span></div>
                     <button onClick={() => setSettingsForm({ ...settingsForm, isAnonymous: !settingsForm.isAnonymous })} className={`w-12 h-6 rounded-full relative transition-colors ${settingsForm.isAnonymous ? 'bg-cyan-600' : 'bg-slate-300'}`}><div className={`absolute top-1 w-4 h-4 bg-white rounded-full transition-all ${settingsForm.isAnonymous ? 'left-7' : 'left-1'}`} /></button>
                 </div>
               </section>
 
-              <section className="pt-6 border-t border-red-50"><button onClick={() => setShowDeleteConfirm(true)} className="w-full p-4 bg-red-50 text-red-600 rounded-2xl font-bold flex items-center justify-center gap-2"><Trash2 size={20} /> Delete Wall</button></section>
+              <section className="pt-6 border-t border-red-50"><button onClick={() => setShowDeleteConfirm(true)} className="w-full p-4 bg-red-50 text-red-600 rounded-2xl font-bold flex items-center justify-center gap-2 hover:bg-red-100 transition-colors"><Trash2 size={20} /> Delete Wall</button></section>
             </div>
-            <div className="p-6 border-t border-slate-100 bg-slate-50 flex justify-end gap-3"><button onClick={() => setShowSettings(false)} className="px-6 py-3 text-slate-500 font-bold">Cancel</button><button onClick={handleSaveSettings} className="px-8 py-3 bg-cyan-600 text-white font-bold rounded-xl shadow-lg">Save Changes</button></div>
+            <div className="p-6 border-t border-slate-100 bg-slate-50 flex justify-end gap-3">
+              <button onClick={() => setShowSettings(false)} className="px-6 py-3 text-slate-500 font-bold hover:text-slate-700">Cancel</button>
+              <button onClick={handleSaveSettings} className="px-8 py-3 bg-cyan-600 text-white font-bold rounded-xl shadow-lg hover:bg-cyan-700 transition-colors">Save Changes</button>
+            </div>
           </div>
         </div>
       )}
@@ -619,44 +756,53 @@ const WallView: React.FC<WallViewProps> = ({
           <div className="fixed inset-0 z-[500] bg-slate-900/60 backdrop-blur-md flex items-center justify-center p-4" onClick={() => setShowDeleteConfirm(false)}>
               <div className="bg-white rounded-[2rem] p-8 max-w-sm w-full text-center space-y-6 animate-in zoom-in-95" onClick={e => e.stopPropagation()}>
                   <div className="h-16 w-16 bg-red-100 rounded-full flex items-center justify-center mx-auto text-red-600"><ShieldAlert size={32} /></div>
-                  <h3 className="text-xl font-black">Delete Wall?</h3>
-                  <div className="flex gap-4"><button onClick={() => setShowDeleteConfirm(false)} className="flex-1 py-3 font-bold bg-slate-100 rounded-xl">No</button><button onClick={handleDeleteWall} className="flex-1 py-3 font-black text-white bg-red-600 rounded-xl">Delete</button></div>
+                  <h3 className="text-xl font-black text-slate-800">Delete Wall?</h3>
+                  <p className="text-sm text-slate-500 font-medium leading-relaxed">This action cannot be undone. All posts will be lost forever.</p>
+                  <div className="flex gap-4">
+                    <button onClick={() => setShowDeleteConfirm(false)} className="flex-1 py-3 font-bold bg-slate-100 rounded-xl text-slate-600">No</button>
+                    <button onClick={handleDeleteWall} className="flex-1 py-3 font-black text-white bg-red-600 rounded-xl">Delete</button>
+                  </div>
               </div>
           </div>
       )}
 
-      {/* Share Modals (Unchanged logic) */}
+      {/* Share Modals */}
       {showShareOverlay && (
         <div className="fixed inset-0 z-[300] bg-slate-900/60 backdrop-blur-md flex items-center justify-center p-4 modal-overlay" onClick={() => setShowShareOverlay(false)}>
             <div className="bg-white rounded-[2.5rem] shadow-2xl p-8 max-w-sm w-full text-center space-y-6 relative" onClick={e => e.stopPropagation()}>
-                <button onClick={() => setShowShareOverlay(false)} className="absolute top-6 right-6 p-2 text-slate-400"><X size={24} /></button>
-                <h3 className="text-2xl font-black">Join this Wall</h3>
-                <div className="bg-white p-4 rounded-3xl border-2 border-cyan-100 inline-block">
+                <button onClick={() => setShowShareOverlay(false)} className="absolute top-6 right-6 p-2 text-slate-400 hover:text-slate-600"><X size={24} /></button>
+                <h3 className="text-2xl font-black text-slate-800">Join this Wall</h3>
+                <div className="bg-white p-4 rounded-3xl border-2 border-cyan-100 inline-block shadow-sm">
                     <img src={`https://api.qrserver.com/v1/create-qr-code/?size=250x250&data=${encodeURIComponent(wallDeepLink)}&color=0891b2&bgcolor=ffffff`} alt="QR" className="w-48 h-48 rounded-xl object-contain"/>
                 </div>
-                <p className="text-4xl font-black text-cyan-600">{wall.joinCode}</p>
-                <div className="flex gap-2"><button onClick={handleCopyLink} className="flex-1 py-4 bg-white border rounded-2xl flex items-center justify-center gap-2 font-bold"><Copy size={18} /> Copy Link</button></div>
-                {isTeacher && <button onClick={handleClassroomShareOpen} className="w-full py-4 bg-white border rounded-2xl flex items-center justify-center gap-3 font-bold"><img src="https://www.gstatic.com/classroom/logo_square_48.svg" className="w-5 h-5" alt="" /> Share to Classroom</button>}
+                <p className="text-4xl font-black text-cyan-600 tracking-tighter">{wall.joinCode}</p>
+                <div className="flex gap-2"><button onClick={handleCopyLink} className="flex-1 py-4 bg-white border border-slate-100 rounded-2xl flex items-center justify-center gap-2 font-bold text-slate-700 hover:bg-slate-50 transition-colors shadow-sm"><Copy size={18} /> Copy Link</button></div>
+                {isTeacher && <button onClick={handleClassroomShareOpen} className="w-full py-4 bg-white border border-slate-100 rounded-2xl flex items-center justify-center gap-3 font-bold text-slate-700 hover:bg-slate-50 transition-colors shadow-sm"><img src="https://www.gstatic.com/classroom/logo_square_48.svg" className="w-5 h-5" alt="" /> Share to Classroom</button>}
             </div>
         </div>
       )}
 
-      {showEditor && <PostEditor authorName={authorName} initialPost={editingPostId ? wall.posts.find(p => p.id === editingPostId) : undefined} onClose={() => { setShowEditor(false); setEditingPostId(null); }} onSubmit={handlePostSubmit} />}
+      {showEditor && <PostEditor authorName={authorName} initialPost={editingPostId ? wall.posts.find(p => p.id === editingPostId) : undefined} parentId={activeParentId || undefined} onClose={() => { setShowEditor(false); setEditingPostId(null); setActiveParentId(null); }} onSubmit={handlePostSubmit} />}
 
       {showClassroomModal && (
         <div className="fixed inset-0 z-[400] bg-slate-900/60 backdrop-blur-sm flex items-center justify-center p-4" onClick={() => setShowClassroomModal(false)}>
           <div className="bg-white rounded-[2rem] shadow-2xl p-8 max-w-lg w-full space-y-6 relative" onClick={e => e.stopPropagation()}>
-            <button onClick={() => setShowClassroomModal(false)} className="absolute top-6 right-6 p-2 text-slate-400"><X size={24} /></button>
-            <h3 className="text-2xl font-black">Post to Classroom</h3>
+            <button onClick={() => setShowClassroomModal(false)} className="absolute top-6 right-6 p-2 text-slate-400 hover:text-slate-600"><X size={24} /></button>
+            <h3 className="text-2xl font-black text-slate-800">Post to Classroom</h3>
             <div className="space-y-2 max-h-60 overflow-y-auto custom-scrollbar">
                 {courses.map(course => (
-                    <div key={course.id} onClick={() => toggleCourseSelection(course.id)} className={`p-4 rounded-2xl border-2 cursor-pointer flex items-center justify-between ${selectedCourses.has(course.id) ? 'border-green-500 bg-green-50' : 'border-slate-100 bg-white'}`}>
+                    <div key={course.id} onClick={() => toggleCourseSelection(course.id)} className={`p-4 rounded-2xl border-2 cursor-pointer flex items-center justify-between transition-all ${selectedCourses.has(course.id) ? 'border-green-500 bg-green-50' : 'border-slate-100 bg-white hover:border-slate-200'}`}>
                         <div className="flex items-center gap-3"><School size={20} className={selectedCourses.has(course.id) ? 'text-green-600' : 'text-slate-400'} /><p className="font-bold text-slate-800">{course.name}</p></div>
                         {selectedCourses.has(course.id) && <Check size={20} className="text-green-600" />}
                     </div>
                 ))}
             </div>
-            <div className="pt-4 flex gap-4"><button onClick={() => setShowClassroomModal(false)} className="flex-1 py-4 font-bold">Cancel</button><button onClick={handleShareToClassroom} disabled={selectedCourses.size === 0 || isSharingToClassroom} className="flex-[2] py-4 rounded-2xl font-black bg-slate-900 text-white disabled:opacity-50">{isSharingToClassroom ? <Loader2 className="animate-spin" /> : 'Post to Classroom'}</button></div>
+            <div className="pt-4 flex gap-4">
+              <button onClick={() => setShowClassroomModal(false)} className="flex-1 py-4 font-bold text-slate-500">Cancel</button>
+              <button onClick={handleShareToClassroom} disabled={selectedCourses.size === 0 || isSharingToClassroom} className="flex-[2] py-4 rounded-2xl font-black bg-slate-900 text-white disabled:opacity-50 hover:bg-slate-800 transition-colors shadow-lg">
+                {isSharingToClassroom ? <Loader2 className="animate-spin mx-auto" size={24} /> : 'Post to Classroom'}
+              </button>
+            </div>
           </div>
         </div>
       )}

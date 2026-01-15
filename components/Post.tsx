@@ -1,7 +1,7 @@
 
 import React, { useState, useRef, useEffect, useMemo } from 'react';
 import { Post as PostType } from '../types';
-import { Trash2, GripHorizontal, ExternalLink, Clock, User, Quote, Pencil, HardDrive, Lock } from 'lucide-react';
+import { Trash2, GripHorizontal, ExternalLink, Clock, User, Quote, Pencil, HardDrive, Lock, MessageCirclePlus } from 'lucide-react';
 import { marked } from 'marked';
 
 interface PostProps {
@@ -10,10 +10,13 @@ interface PostProps {
   onEdit?: (id: string) => void;
   onMove: (id: string, x: number, y: number) => void;
   onMoveEnd?: (id: string, x: number, y: number) => void;
+  onAddDetail?: (parentId: string) => void; // Support timeline attachments
+  children?: React.ReactNode; // Nested posts for timeline
   isOwner: boolean;
   snapToGrid?: boolean;
   isWallAnonymous?: boolean;
   isWallFrozen?: boolean;
+  isTimelineMilestone?: boolean;
   zoom: number;
 }
 
@@ -34,12 +37,18 @@ const getRelativeTime = (timestamp: number): string => {
   return new Date(timestamp).toLocaleDateString();
 };
 
-const Post: React.FC<PostProps> = ({ post, onDelete, onEdit, onMove, onMoveEnd, isOwner, snapToGrid, isWallAnonymous, isWallFrozen, zoom }) => {
+const Post: React.FC<PostProps> = ({ 
+  post, onDelete, onEdit, onMove, onMoveEnd, onAddDetail, children, 
+  isOwner, snapToGrid, isWallAnonymous, isWallFrozen, isTimelineMilestone, zoom 
+}) => {
   const [isDragging, setIsDragging] = useState(false);
   const [relativeTime, setRelativeTime] = useState(getRelativeTime(post.createdAt));
   const dragStartPos = useRef({ x: 0, y: 0 });
   const postStartPos = useRef({ x: post.x, y: post.y });
   const currentPos = useRef({ x: post.x, y: post.y });
+
+  // In timeline mode, milestones are draggable horizontally even if not "freeform"
+  const canDrag = isOwner && !isWallFrozen && (post.x !== 0 || post.y !== 0 || isTimelineMilestone);
 
   // Render markdown safely
   const renderedMarkdown = useMemo(() => {
@@ -51,13 +60,13 @@ const Post: React.FC<PostProps> = ({ post, onDelete, onEdit, onMove, onMoveEnd, 
   useEffect(() => {
     const timer = setInterval(() => {
       setRelativeTime(getRelativeTime(post.createdAt));
-    }, 60000); // Update every minute
+    }, 60000); 
     return () => clearInterval(timer);
   }, [post.createdAt]);
 
   const handleMouseDown = (e: React.MouseEvent) => {
     e.stopPropagation();
-    if (!isOwner || isWallFrozen) return;
+    if (!canDrag) return;
     if ((e.target as HTMLElement).closest('button, video, a, input, [role="button"]')) return;
 
     setIsDragging(true);
@@ -74,11 +83,12 @@ const Post: React.FC<PostProps> = ({ post, onDelete, onEdit, onMove, onMoveEnd, 
     const dy = (e.clientY - dragStartPos.current.y) / zoom;
     
     let nextX = postStartPos.current.x + dx;
-    let nextY = postStartPos.current.y + dy;
+    // Lock Y-axis for timeline milestones
+    let nextY = isTimelineMilestone ? postStartPos.current.y : postStartPos.current.y + dy;
 
     if (snapToGrid) {
       nextX = Math.round(nextX / 20) * 20;
-      nextY = Math.round(nextY / 20) * 20;
+      if (!isTimelineMilestone) nextY = Math.round(nextY / 20) * 20;
     }
 
     currentPos.current = { x: nextX, y: nextY };
@@ -176,75 +186,97 @@ const Post: React.FC<PostProps> = ({ post, onDelete, onEdit, onMove, onMoveEnd, 
   const isHexColor = post.color?.startsWith('#');
   
   const containerStyle: React.CSSProperties = {
-    left: post.x,
-    top: post.y,
+    left: (post.x !== 0 || post.y !== 0 || isTimelineMilestone) ? post.x : undefined,
+    top: (post.x !== 0 || post.y !== 0 || isTimelineMilestone) ? post.y : undefined,
     zIndex: isDragging ? 9999 : post.zIndex,
-    backgroundColor: isHexColor ? post.color : undefined
+    backgroundColor: isHexColor ? post.color : undefined,
+    position: (post.x !== 0 || post.y !== 0 || isTimelineMilestone) ? 'absolute' : 'relative'
   };
   
-  const containerClass = `post-container absolute p-4 w-[300px] rounded-2xl shadow-lg border border-black/5 transition-all duration-75 ${!isHexColor ? post.color : ''} group select-none ${isDragging ? 'shadow-2xl z-[9999] scale-[1.02] cursor-grabbing' : (isOwner && !isWallFrozen ? 'cursor-grab' : 'cursor-default')} hover:shadow-2xl`;
+  const containerClass = `post-container p-4 w-full sm:w-[300px] rounded-2xl shadow-lg border border-black/5 transition-all duration-75 ${!isHexColor ? post.color : ''} group select-none ${isDragging ? 'shadow-2xl z-[9999] scale-[1.02] cursor-grabbing' : (canDrag ? 'cursor-grab' : 'cursor-default')} hover:shadow-2xl ${isTimelineMilestone ? 'mt-8' : ''}`;
 
   return (
-    <div 
-      className={containerClass}
-      style={containerStyle}
-      onMouseDown={handleMouseDown}
-    >
-      <div className="flex items-center justify-between mb-3">
-        <div className="flex items-center gap-2">
-          <div className="h-6 w-6 rounded-full overflow-hidden bg-white/40 border border-black/5 flex items-center justify-center">
-            {post.authorAvatar && !isWallAnonymous ? (
-              <img src={post.authorAvatar} className="h-full w-full object-cover" alt="" referrerPolicy="no-referrer" />
-            ) : (
-              <User size={12} className="text-slate-600" />
+    <div className={`flex flex-col items-center gap-4 ${isTimelineMilestone ? 'pointer-events-auto' : ''}`}>
+      {isTimelineMilestone && (
+        <div className="h-8 w-1 bg-white/40 shadow-sm" />
+      )}
+      <div 
+        className={containerClass}
+        style={containerStyle}
+        onMouseDown={handleMouseDown}
+      >
+        <div className="flex items-center justify-between mb-3">
+          <div className="flex items-center gap-2">
+            <div className="h-6 w-6 rounded-full overflow-hidden bg-white/40 border border-black/5 flex items-center justify-center">
+              {post.authorAvatar && !isWallAnonymous ? (
+                <img src={post.authorAvatar} className="h-full w-full object-cover" alt="" referrerPolicy="no-referrer" />
+              ) : (
+                <User size={12} className="text-slate-600" />
+              )}
+            </div>
+            <span className="text-xs font-bold text-slate-800 truncate max-w-[120px]">{displayName}</span>
+          </div>
+          <div className="flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
+            {isWallFrozen && <Lock size={14} className="text-slate-400 mr-2" />}
+            {!isWallFrozen && onAddDetail && (
+              <button 
+                onClick={(e) => { e.stopPropagation(); onAddDetail(post.id); }}
+                title="Add Detail"
+                className="p-1.5 text-slate-500 hover:text-indigo-600 hover:bg-indigo-50 rounded-lg transition-colors"
+              >
+                <MessageCirclePlus size={14} />
+              </button>
+            )}
+            {isOwner && onEdit && !isWallFrozen && (
+              <button 
+                onClick={(e) => { e.stopPropagation(); onEdit(post.id); }}
+                className="p-1.5 text-slate-500 hover:text-cyan-600 hover:bg-cyan-50 rounded-lg transition-colors"
+              >
+                <Pencil size={14} />
+              </button>
+            )}
+            {isOwner && !isWallFrozen && (
+              <button 
+                onClick={(e) => { e.stopPropagation(); onDelete(post.id); }}
+                className="p-1.5 text-slate-500 hover:text-red-500 hover:bg-red-50 rounded-lg transition-colors"
+              >
+                <Trash2 size={14} />
+              </button>
+            )}
+            {isOwner && !isWallFrozen && !isTimelineMilestone && (post.x !== 0 || post.y !== 0) && (
+              <div className="p-1.5 text-slate-400">
+                <GripHorizontal size={16} />
+              </div>
             )}
           </div>
-          <span className="text-xs font-bold text-slate-800 truncate max-w-[120px]">{displayName}</span>
         </div>
-        <div className="flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
-          {isWallFrozen && <Lock size={14} className="text-slate-400 mr-2" />}
-          {isOwner && onEdit && !isWallFrozen && (
-             <button 
-              onClick={(e) => { e.stopPropagation(); onEdit(post.id); }}
-              className="p-1.5 text-slate-500 hover:text-cyan-600 hover:bg-cyan-50 rounded-lg transition-colors"
-            >
-              <Pencil size={14} />
-            </button>
-          )}
-          {isOwner && !isWallFrozen && (
-            <button 
-              onClick={(e) => { e.stopPropagation(); onDelete(post.id); }}
-              className="p-1.5 text-slate-500 hover:text-red-500 hover:bg-red-50 rounded-lg transition-colors"
-            >
-              <Trash2 size={14} />
-            </button>
-          )}
-          {isOwner && !isWallFrozen && (
-            <div className="p-1.5 text-slate-400">
-              <GripHorizontal size={16} />
+
+        <div className="min-h-[40px]">
+          {renderContent()}
+          {post.metadata?.caption && (
+            <div className="mt-3 pt-3 border-t border-black/5 bg-white/40 -mx-4 px-4 pb-1 rounded-b-xl shadow-inner">
+              <p className="text-sm text-slate-900 font-bold italic flex gap-2">
+                <Quote size={12} className="text-indigo-500 flex-shrink-0 mt-0.5" />
+                {post.metadata.caption}
+              </p>
             </div>
           )}
         </div>
-      </div>
 
-      <div className="min-h-[40px]">
-        {renderContent()}
-        {post.metadata?.caption && (
-          <div className="mt-3 pt-3 border-t border-black/5 bg-black/5 -mx-4 px-4 pb-1 rounded-b-xl">
-            <p className="text-sm text-slate-900 font-bold italic flex gap-2">
-              <Quote size={12} className="text-indigo-500 flex-shrink-0 mt-0.5" />
-              {post.metadata.caption}
-            </p>
+        <div className="mt-4 pt-3 border-t border-black/5 flex items-center justify-between">
+          <div className="flex items-center gap-1 text-[10px] text-slate-600 font-black uppercase tracking-wider">
+            <Clock size={10} />
+            {relativeTime}
           </div>
-        )}
-      </div>
-
-      <div className="mt-4 pt-3 border-t border-black/5 flex items-center justify-between">
-        <div className="flex items-center gap-1 text-[10px] text-slate-600 font-black uppercase tracking-wider">
-          <Clock size={10} />
-          {relativeTime}
         </div>
       </div>
+      
+      {/* Nested detail posts for Timeline */}
+      {children && (
+        <div className="flex flex-col items-center gap-4 w-full mt-4">
+           {children}
+        </div>
+      )}
     </div>
   );
 };

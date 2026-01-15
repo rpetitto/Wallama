@@ -1,6 +1,6 @@
 
 import React, { useState, useEffect } from 'react';
-import { User, Wall, Post } from './types';
+import { User, Wall, Post, WallType } from './types';
 import Auth from './components/Auth';
 import WallDashboard from './components/WallDashboard';
 import WallView from './components/WallView';
@@ -126,12 +126,13 @@ const App: React.FC = () => {
     }
   };
 
-  const handleCreateWall = async (name: string, description: string) => {
+  const handleCreateWall = async (name: string, description: string, type: WallType) => {
     if (!user || user.role !== 'teacher') return;
     
     setIsSyncing(true);
     const newWallData: Partial<Wall> = {
       name: name || 'Untitled Wall',
+      type: type,
       description: description || 'No description.',
       joinCode: GENERATE_JOIN_CODE(),
       teacherId: user.id,
@@ -159,7 +160,7 @@ const App: React.FC = () => {
       ...postData,
       authorId: user.id,
       authorName: user.name,
-      authorAvatar: user.avatar, // Captured user photo
+      authorAvatar: user.avatar, 
       color: postData.color || 'bg-white',
     };
     return await databaseService.addPost(activeWallId, newPost);

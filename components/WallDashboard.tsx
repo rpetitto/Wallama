@@ -1,13 +1,14 @@
 
 import React, { useState } from 'react';
-import { User, Wall } from '../types';
-import { Plus, LogOut, ArrowRight, Layout, Users, Calendar, X, Loader2, BookOpen } from 'lucide-react';
+import { User, Wall, WallType } from '../types';
+// Added Check to the imports
+import { Plus, LogOut, ArrowRight, Layout, Users, Calendar, X, Loader2, BookOpen, Layers, Grip, List, ChevronRight, Check, History } from 'lucide-react';
 import { LlamaLogo } from './LlamaLogo';
 
 interface WallDashboardProps {
   user: User;
   walls: Wall[];
-  onCreateWall: (name: string, desc: string) => void;
+  onCreateWall: (name: string, desc: string, type: WallType) => void;
   onJoinWall: (code: string) => void;
   onSelectWall: (id: string) => void;
   onLogout: () => void;
@@ -18,12 +19,33 @@ const WallDashboard: React.FC<WallDashboardProps> = ({
   user, walls, onCreateWall, onJoinWall, onSelectWall, onLogout, isSyncing 
 }) => {
   const [showCreateModal, setShowCreateModal] = useState(false);
+  const [createStep, setCreateStep] = useState<1 | 2>(1);
   const [newWallName, setNewWallName] = useState('');
   const [newWallDesc, setNewWallDesc] = useState('');
+  const [newWallType, setNewWallType] = useState<WallType>('freeform');
   const [joinCode, setJoinCode] = useState('');
 
   const isTeacher = user.role === 'teacher';
   const sectionTitle = isTeacher ? 'My Created Walls' : 'My Joined Walls';
+
+  const wallTypes: { id: WallType; label: string; desc: string; icon: any }[] = [
+    { id: 'freeform', label: 'Freeform', desc: 'Drag and drop posts anywhere on a canvas.', icon: Grip },
+    { id: 'wall', label: 'Wall', desc: 'A compact grid where posts automatically fit.', icon: Layers },
+    { id: 'stream', label: 'Stream', desc: 'Posts appear in a single vertical chronological list.', icon: List },
+    { id: 'timeline', label: 'Timeline', desc: 'milestones on a horizontal line. Attach details to milestones.', icon: History }
+  ];
+
+  const handleNextStep = () => {
+    if (newWallName) setCreateStep(2);
+  };
+
+  const handleCreate = () => {
+    onCreateWall(newWallName, newWallDesc, newWallType);
+    setShowCreateModal(false);
+    setCreateStep(1);
+    setNewWallName('');
+    setNewWallDesc('');
+  };
 
   return (
     <div className="min-h-screen bg-sky-50">
@@ -128,6 +150,15 @@ const WallDashboard: React.FC<WallDashboardProps> = ({
                   </div>
                 </div>
                 <div className="p-6">
+                  <div className="flex items-center gap-2 mb-2">
+                    <span className="text-[10px] font-black text-cyan-600 uppercase tracking-widest bg-cyan-50 px-2 py-0.5 rounded-md border border-cyan-100 flex items-center gap-1">
+                      {wall.type === 'freeform' && <Grip size={10} />}
+                      {wall.type === 'wall' && <Layers size={10} />}
+                      {wall.type === 'stream' && <List size={10} />}
+                      {wall.type === 'timeline' && <History size={10} />}
+                      {wall.type}
+                    </span>
+                  </div>
                   <p className="text-sm text-slate-500 line-clamp-2 mb-4 h-10 font-medium leading-relaxed">{wall.description}</p>
                   <div className="flex items-center justify-between text-[10px] font-bold text-slate-400 uppercase tracking-widest pt-4 border-t border-slate-50">
                     <div className="flex items-center gap-1"><Users size={12} /> Collaborative</div>
@@ -152,43 +183,91 @@ const WallDashboard: React.FC<WallDashboardProps> = ({
 
       {showCreateModal && (
         <div className="fixed inset-0 z-[60] flex items-center justify-center p-4 bg-slate-900/60 backdrop-blur-sm animate-in fade-in duration-300">
-          <div className="bg-white w-full max-w-md rounded-[2.5rem] p-8 shadow-2xl relative">
-            <button onClick={() => setShowCreateModal(false)} className="absolute top-6 right-6 text-slate-400 hover:text-slate-600 p-2 rounded-full hover:bg-slate-100 transition-colors">
+          <div className="bg-white w-full max-w-lg rounded-[2.5rem] p-8 shadow-2xl relative">
+            <button onClick={() => { setShowCreateModal(false); setCreateStep(1); }} className="absolute top-6 right-6 text-slate-400 hover:text-slate-600 p-2 rounded-full hover:bg-slate-100 transition-colors">
               <X size={20} />
             </button>
-            <h3 className="text-2xl font-bold text-slate-900 mb-6 tracking-tight">New Wall</h3>
-            <div className="space-y-4">
-              <div>
-                <label className="block text-xs font-bold text-slate-400 uppercase tracking-widest mb-2 ml-1">Title</label>
-                <input
-                  autoFocus
-                  type="text"
-                  value={newWallName}
-                  onChange={(e) => setNewWallName(e.target.value)}
-                  placeholder="Class Reflection"
-                  className="w-full px-5 py-4 bg-slate-50 border border-slate-200 rounded-2xl focus:ring-4 focus:ring-cyan-100 outline-none text-slate-900 font-bold placeholder:text-slate-300"
-                />
-              </div>
-              <div>
-                <label className="block text-xs font-bold text-slate-400 uppercase tracking-widest mb-2 ml-1">Description</label>
-                <textarea
-                  value={newWallDesc}
-                  onChange={(e) => setNewWallDesc(e.target.value)}
-                  placeholder="A space for sharing thoughts..."
-                  className="w-full px-5 py-4 bg-slate-50 border border-slate-200 rounded-2xl focus:ring-4 focus:ring-cyan-100 outline-none h-32 resize-none text-slate-900 font-medium placeholder:text-slate-300"
-                />
-              </div>
+            
+            <div className="flex items-center gap-2 mb-8">
+               <div className={`h-2 w-12 rounded-full ${createStep === 1 ? 'bg-cyan-600' : 'bg-slate-200'}`} />
+               <div className={`h-2 w-12 rounded-full ${createStep === 2 ? 'bg-cyan-600' : 'bg-slate-200'}`} />
+               <span className="text-[10px] font-black text-slate-400 uppercase tracking-widest ml-2">Step {createStep} of 2</span>
             </div>
-            <div className="flex gap-4 mt-8">
-              <button 
-                onClick={() => { onCreateWall(newWallName, newWallDesc); setShowCreateModal(false); }}
-                disabled={!newWallName || isSyncing}
-                className="flex-1 bg-cyan-600 text-white py-4 rounded-2xl hover:bg-cyan-700 transition-all font-bold shadow-lg disabled:bg-slate-200 active:scale-95 flex items-center justify-center gap-2"
-              >
-                {isSyncing && <Loader2 className="animate-spin" size={20} />}
-                Create Wall
-              </button>
-            </div>
+
+            {createStep === 1 ? (
+              <div className="space-y-6">
+                <h3 className="text-2xl font-black text-slate-800 tracking-tight">Name your Wall</h3>
+                <div className="space-y-4">
+                  <div>
+                    <label className="block text-xs font-bold text-slate-400 uppercase tracking-widest mb-2 ml-1">Title</label>
+                    <input
+                      autoFocus
+                      type="text"
+                      value={newWallName}
+                      onChange={(e) => setNewWallName(e.target.value)}
+                      onKeyDown={(e) => e.key === 'Enter' && handleNextStep()}
+                      placeholder="Class Reflection"
+                      className="w-full px-5 py-4 bg-slate-50 border border-slate-200 rounded-2xl focus:ring-4 focus:ring-cyan-100 outline-none text-slate-900 font-bold placeholder:text-slate-300"
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-xs font-bold text-slate-400 uppercase tracking-widest mb-2 ml-1">Description</label>
+                    <textarea
+                      value={newWallDesc}
+                      onChange={(e) => setNewWallDesc(e.target.value)}
+                      placeholder="A space for sharing thoughts..."
+                      className="w-full px-5 py-4 bg-slate-50 border border-slate-200 rounded-2xl focus:ring-4 focus:ring-cyan-100 outline-none h-32 resize-none text-slate-900 font-medium placeholder:text-slate-300"
+                    />
+                  </div>
+                </div>
+                <button 
+                  onClick={handleNextStep}
+                  disabled={!newWallName}
+                  className="w-full bg-slate-900 text-white py-4 rounded-2xl hover:bg-slate-800 transition-all font-bold shadow-lg disabled:bg-slate-200 active:scale-95 flex items-center justify-center gap-2"
+                >
+                  Continue <ChevronRight size={20} />
+                </button>
+              </div>
+            ) : (
+              <div className="space-y-6">
+                <h3 className="text-2xl font-black text-slate-800 tracking-tight">Choose a Layout</h3>
+                <div className="grid grid-cols-1 gap-3">
+                  {wallTypes.map(type => (
+                    <button
+                      key={type.id}
+                      onClick={() => setNewWallType(type.id)}
+                      className={`p-4 rounded-2xl border-2 text-left flex items-start gap-4 transition-all ${newWallType === type.id ? 'border-cyan-600 bg-cyan-50 shadow-md ring-2 ring-cyan-500/10' : 'border-slate-100 hover:border-slate-200'}`}
+                    >
+                      <div className={`h-12 w-12 rounded-xl flex items-center justify-center shrink-0 ${newWallType === type.id ? 'bg-cyan-600 text-white' : 'bg-slate-100 text-slate-500'}`}>
+                        <type.icon size={24} />
+                      </div>
+                      <div>
+                        <p className={`font-bold ${newWallType === type.id ? 'text-cyan-900' : 'text-slate-800'}`}>{type.label}</p>
+                        <p className={`text-xs ${newWallType === type.id ? 'text-cyan-700' : 'text-slate-500'} leading-relaxed`}>{type.desc}</p>
+                      </div>
+                      {newWallType === type.id && (
+                        <div className="ml-auto">
+                          <div className="h-6 w-6 rounded-full bg-cyan-600 flex items-center justify-center text-white">
+                            <Check size={14} strokeWidth={3} />
+                          </div>
+                        </div>
+                      )}
+                    </button>
+                  ))}
+                </div>
+                <div className="flex gap-4">
+                   <button onClick={() => setCreateStep(1)} className="px-6 py-4 font-bold text-slate-400">Back</button>
+                   <button 
+                    onClick={handleCreate}
+                    disabled={isSyncing}
+                    className="flex-1 bg-cyan-600 text-white py-4 rounded-2xl hover:bg-cyan-700 transition-all font-bold shadow-lg disabled:bg-slate-200 active:scale-95 flex items-center justify-center gap-2"
+                  >
+                    {isSyncing && <Loader2 className="animate-spin" size={20} />}
+                    Create Wall
+                  </button>
+                </div>
+              </div>
+            )}
           </div>
         </div>
       )}

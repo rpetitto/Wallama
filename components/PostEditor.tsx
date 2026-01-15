@@ -13,12 +13,13 @@ interface PostEditorProps {
   onSubmit: (post: Partial<Post>) => void;
   authorName: string;
   initialPost?: Post;
+  parentId?: string; // Support for attached details
 }
 
 const GIPHY_API_KEY = 'eo5zSu2rUveZJB4kxO3S1Rv57KkMbhiQ'; 
 const GOOGLE_CLIENT_ID = "6888240288-5v0p6nsoi64q1puv1vpvk1njd398ra8b.apps.googleusercontent.com";
 
-const PostEditor: React.FC<PostEditorProps> = ({ onClose, onSubmit, authorName, initialPost }) => {
+const PostEditor: React.FC<PostEditorProps> = ({ onClose, onSubmit, authorName, initialPost, parentId }) => {
   const [type, setType] = useState<PostType>('text');
   const [content, setContent] = useState('');
   const [caption, setCaption] = useState('');
@@ -339,7 +340,8 @@ const PostEditor: React.FC<PostEditorProps> = ({ onClose, onSubmit, authorName, 
       type,
       content: submissionContent,
       metadata: submissionMetadata,
-      color: selectedColor
+      color: selectedColor,
+      parentId: parentId || undefined
     });
   };
 
@@ -353,7 +355,7 @@ const PostEditor: React.FC<PostEditorProps> = ({ onClose, onSubmit, authorName, 
       >
         <div className="p-6 border-b border-black/5 flex items-center justify-between bg-white/50 backdrop-blur-sm">
           <div>
-            <h3 className="text-xl font-bold text-slate-800">{initialPost ? 'Edit Post' : 'Add to Wallama'}</h3>
+            <h3 className="text-xl font-bold text-slate-800">{parentId ? 'Add Detail to Milestone' : (initialPost ? 'Edit Post' : 'Add to Wallama')}</h3>
             <p className="text-sm text-slate-600 font-medium">Author: {authorName}</p>
           </div>
           <button onClick={onClose} className="p-2 hover:bg-black/5 rounded-full transition-colors text-slate-500">

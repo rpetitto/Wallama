@@ -15,6 +15,7 @@ const mapWallFromDB = (dbWall: any): Wall => {
   return {
     id: dbWall.id,
     name: dbWall.name || 'Untitled Wall',
+    type: dbWall.type || 'freeform',
     description: dbWall.description || '',
     joinCode: dbWall.join_code || '',
     teacherId: dbWall.teacher_id || '',
@@ -42,6 +43,7 @@ const mapPostFromDB = (dbPost: any): Post => {
     y: Number(dbPost.y) || 0,
     zIndex: Number(dbPost.z_index) || 1, 
     color: dbPost.color || 'bg-white',
+    parentId: dbPost.parent_id || undefined,
     metadata: dbPost.metadata || {}
   };
 };
@@ -141,6 +143,7 @@ export const databaseService = {
         .from('walls')
         .insert([{
           name: wall.name,
+          type: wall.type || 'freeform',
           description: wall.description,
           join_code: wall.joinCode,
           teacher_id: wall.teacherId,
@@ -188,6 +191,7 @@ export const databaseService = {
         y: Math.round(post.y || 100),
         z_index: Math.round(nextZ),
         color: post.color || 'bg-white',
+        parent_id: post.parentId || null,
         metadata: post.metadata || {}
       };
 
