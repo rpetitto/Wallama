@@ -12,7 +12,7 @@ import { GoogleGenAI } from "@google/genai";
 declare const google: any;
 const GOOGLE_CLIENT_ID = "6888240288-5v0p6nsoi64q1puv1vpvk1njd398ra8b.apps.googleusercontent.com";
 
-const TIMELINE_AXIS_Y = 300; // Updated for better positioning
+const TIMELINE_AXIS_Y = 450; 
 const MIN_MILESTONE_SPACING = 340; // 300px card + 40px gap
 
 interface WallViewProps {

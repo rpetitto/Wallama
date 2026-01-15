@@ -192,15 +192,16 @@ const Post: React.FC<PostProps> = ({
 
   const displayName = isWallAnonymous ? 'Anonymous' : post.authorName;
   const isHexColor = post.color?.startsWith('#');
+  const isWrapperControlled = isTimelineMilestone;
   const isAbsolute = (isTimelineMilestone) || (!isTimelineMilestone && (post.x !== 0 || post.y !== 0));
 
   const containerStyle: React.CSSProperties = {
-    left: isAbsolute ? post.x : undefined,
-    top: isAbsolute ? post.y : undefined,
+    left: (isAbsolute && !isWrapperControlled) ? post.x : undefined,
+    top: (isAbsolute && !isWrapperControlled) ? post.y : undefined,
     zIndex: isDragging ? 9999 : post.zIndex,
     backgroundColor: isHexColor ? post.color : undefined,
-    position: isAbsolute ? 'absolute' : 'relative',
-    width: isAbsolute ? '300px' : '100%' // Crucial fix: constraint width on canvas
+    position: (isAbsolute && !isWrapperControlled) ? 'absolute' : 'relative',
+    width: (isAbsolute || isWrapperControlled) ? '300px' : '100%'
   };
   
   const containerClass = `post-container p-4 rounded-2xl shadow-lg border border-black/5 transition-all duration-75 ${!isHexColor ? post.color : ''} group select-none ${isDragging ? 'shadow-2xl z-[9999] scale-[1.02] cursor-grabbing' : (canDrag ? 'cursor-grab' : 'cursor-default')} hover:shadow-2xl`;
@@ -258,23 +259,41 @@ const Post: React.FC<PostProps> = ({
 
   if (isTimelineMilestone) {
     return (
-      <div className="flex flex-col items-center gap-2 pointer-events-none" style={{ position: 'absolute', left: post.x, top: post.y, width: '300px', zIndex: isDragging ? 9999 : post.zIndex }}>
-        <div className="h-10 w-1.5 bg-white/50 shadow-sm rounded-full mb-[-8px]" />
-        <div className="pointer-events-auto w-full">
-          {PostContent}
-        </div>
+      <div 
+        className="absolute pointer-events-none group" 
+        style={{ left: post.x, top: post.y, width: 0, height: 0, zIndex: isDragging ? 9999 : post.zIndex }}
+      >
+        {/* Anchor Dot - Centered on Y=0 relative to this container (which is at axis Y) */}
+        <div className="absolute top-[-10px] left-[-10px] w-5 h-5 bg-cyan-600 rounded-full border-4 border-white shadow-md z-20" />
         
-        {!isWallFrozen && onAddDetail && (
-          <button 
-            onClick={(e) => { e.stopPropagation(); onAddDetail(post.id); }}
-            className="mt-3 h-10 w-10 bg-indigo-600 text-white rounded-full shadow-lg flex items-center justify-center hover:scale-110 active:scale-95 transition-all animate-in zoom-in-50 duration-300 border-2 border-white/50 group pointer-events-auto"
-            title="Add Detail to Milestone"
-          >
-            <Plus size={20} className="group-hover:rotate-90 transition-transform duration-300" />
-          </button>
-        )}
+        {/* Top Section: Milestone Post (Above Axis) */}
+        <div className="absolute bottom-[20px] left-[-150px] w-[300px] flex flex-col items-center justify-end">
+           <div className="w-full pointer-events-auto pb-2">
+              {PostContent}
+           </div>
+           {/* Connector Stem */}
+           <div className="h-6 w-1 bg-cyan-600/30 rounded-full" />
+        </div>
 
-        {children && <div className="flex flex-col items-center gap-4 w-full mt-4 pointer-events-auto">{children}</div>}
+        {/* Bottom Section: Details (Below Axis) */}
+        <div className="absolute top-[20px] left-[-150px] w-[300px] flex flex-col items-center justify-start">
+            {/* Connector Stem */}
+            {(children || onAddDetail) && <div className="h-6 w-1 bg-cyan-600/30 absolute -top-6 rounded-full" />}
+            
+            <div className="flex flex-col items-center gap-3 w-full pointer-events-auto">
+               {children}
+               
+               {!isWallFrozen && onAddDetail && (
+                 <button 
+                    onClick={(e) => { e.stopPropagation(); onAddDetail(post.id); }}
+                    className="mt-1 h-8 w-8 bg-indigo-50 text-indigo-600 rounded-full border border-indigo-200 shadow-sm flex items-center justify-center hover:bg-indigo-600 hover:text-white transition-all pointer-events-auto z-30"
+                    title="Add Detail to Milestone"
+                 >
+                    <Plus size={16} />
+                 </button>
+               )}
+            </div>
+        </div>
       </div>
     );
   }
