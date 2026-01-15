@@ -1,7 +1,6 @@
 
 import React, { useState } from 'react';
 import { User, Wall, WallType } from '../types';
-// Added Check to the imports
 import { Plus, LogOut, ArrowRight, Layout, Users, Calendar, X, Loader2, BookOpen, Layers, Grip, List, ChevronRight, Check, History } from 'lucide-react';
 import { LlamaLogo } from './LlamaLogo';
 
@@ -131,42 +130,56 @@ const WallDashboard: React.FC<WallDashboardProps> = ({
             )}
           </div>
           <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-6">
-            {walls.map(wall => (
-              <div 
-                key={wall.id} 
-                onClick={() => onSelectWall(wall.id)}
-                className="group bg-white rounded-3xl overflow-hidden shadow-sm border border-slate-100 hover:shadow-xl hover:-translate-y-1 transition-all cursor-pointer"
-              >
-                <div className={`h-32 bg-gradient-to-br ${wall.background} p-6 flex flex-col justify-between`}>
-                  <div className="flex justify-between items-start">
-                    <span className="bg-white/20 backdrop-blur-md px-3 py-1 rounded-full text-[10px] font-bold text-white uppercase tracking-wider border border-white/20">
-                      {wall.posts.length} Posts
-                    </span>
-                    <span className="text-white/80 font-mono text-sm font-bold tracking-widest">{wall.joinCode}</span>
+            {walls.map(wall => {
+              const isUrlBg = wall.background.startsWith('http') || wall.background.startsWith('data:');
+              const wallBgStyle = isUrlBg 
+                ? { backgroundImage: `url(${wall.background})`, backgroundSize: 'cover', backgroundPosition: 'center' }
+                : {};
+              const wallBgClass = !isUrlBg ? `bg-gradient-to-br ${wall.background}` : '';
+
+              return (
+                <div 
+                  key={wall.id} 
+                  onClick={() => onSelectWall(wall.id)}
+                  className="group bg-white rounded-3xl overflow-hidden shadow-sm border border-slate-100 hover:shadow-xl hover:-translate-y-1 transition-all cursor-pointer"
+                >
+                  <div 
+                    className={`h-32 p-6 flex flex-col justify-between relative ${wallBgClass}`}
+                    style={wallBgStyle}
+                  >
+                    {/* Overlay for better readability on image backgrounds */}
+                    {isUrlBg && <div className="absolute inset-0 bg-black/10 group-hover:bg-black/20 transition-colors" />}
+                    
+                    <div className="relative z-10 flex justify-between items-start">
+                      <span className="bg-white/20 backdrop-blur-md px-3 py-1 rounded-full text-[10px] font-bold text-white uppercase tracking-wider border border-white/20">
+                        {wall.posts.length} Posts
+                      </span>
+                      <span className="text-white font-mono text-sm font-bold tracking-widest drop-shadow-md">{wall.joinCode}</span>
+                    </div>
+                    <div className="relative z-10 flex items-center gap-3">
+                      <span className="text-2xl bg-white/30 backdrop-blur-md rounded-lg h-10 w-10 flex items-center justify-center shadow-sm border border-white/10">{wall.icon || '📝'}</span>
+                      <h4 className="text-white font-bold text-xl truncate tracking-tight drop-shadow-md">{wall.name}</h4>
+                    </div>
                   </div>
-                  <div className="flex items-center gap-3">
-                    <span className="text-2xl bg-white/20 backdrop-blur-md rounded-lg h-10 w-10 flex items-center justify-center shadow-sm border border-white/10">{wall.icon || '📝'}</span>
-                    <h4 className="text-white font-bold text-xl truncate tracking-tight">{wall.name}</h4>
+                  <div className="p-6">
+                    <div className="flex items-center gap-2 mb-2">
+                      <span className="text-[10px] font-black text-cyan-600 uppercase tracking-widest bg-cyan-50 px-2 py-0.5 rounded-md border border-cyan-100 flex items-center gap-1">
+                        {wall.type === 'freeform' && <Grip size={10} />}
+                        {wall.type === 'wall' && <Layers size={10} />}
+                        {wall.type === 'stream' && <List size={10} />}
+                        {wall.type === 'timeline' && <History size={10} />}
+                        {wall.type}
+                      </span>
+                    </div>
+                    <p className="text-sm text-slate-500 line-clamp-2 mb-4 h-10 font-medium leading-relaxed">{wall.description}</p>
+                    <div className="flex items-center justify-between text-[10px] font-bold text-slate-400 uppercase tracking-widest pt-4 border-t border-slate-50">
+                      <div className="flex items-center gap-1"><Users size={12} /> Collaborative</div>
+                      <div className="flex items-center gap-1"><Calendar size={12} /> Active</div>
+                    </div>
                   </div>
                 </div>
-                <div className="p-6">
-                  <div className="flex items-center gap-2 mb-2">
-                    <span className="text-[10px] font-black text-cyan-600 uppercase tracking-widest bg-cyan-50 px-2 py-0.5 rounded-md border border-cyan-100 flex items-center gap-1">
-                      {wall.type === 'freeform' && <Grip size={10} />}
-                      {wall.type === 'wall' && <Layers size={10} />}
-                      {wall.type === 'stream' && <List size={10} />}
-                      {wall.type === 'timeline' && <History size={10} />}
-                      {wall.type}
-                    </span>
-                  </div>
-                  <p className="text-sm text-slate-500 line-clamp-2 mb-4 h-10 font-medium leading-relaxed">{wall.description}</p>
-                  <div className="flex items-center justify-between text-[10px] font-bold text-slate-400 uppercase tracking-widest pt-4 border-t border-slate-50">
-                    <div className="flex items-center gap-1"><Users size={12} /> Collaborative</div>
-                    <div className="flex items-center gap-1"><Calendar size={12} /> Active</div>
-                  </div>
-                </div>
-              </div>
-            ))}
+              );
+            })}
             {walls.length === 0 && !isSyncing && (
               <div className="col-span-full py-20 text-center bg-slate-100 rounded-[2.5rem] border-2 border-dashed border-slate-200">
                 <BookOpen size={48} className="mx-auto text-slate-300 mb-4" />

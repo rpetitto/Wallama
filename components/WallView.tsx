@@ -58,7 +58,7 @@ const WallView: React.FC<WallViewProps> = ({
 
   // Drive state for settings
   const [driveFiles, setDriveFiles] = useState<any[]>([]);
-  const [driveToken, setDriveToken] = useState<string | null>(null);
+  const [driveToken, setDriveToken] = useState<string | null>(sessionStorage.getItem('google_drive_token'));
   const driveTokenClient = useRef<any>(null);
 
   const [zoom, setZoom] = useState(1);
@@ -90,6 +90,7 @@ const WallView: React.FC<WallViewProps> = ({
         scope: 'https://www.googleapis.com/auth/drive.readonly',
         callback: (response: any) => {
           if (response.access_token) {
+            sessionStorage.setItem('google_drive_token', response.access_token);
             setDriveToken(response.access_token);
             fetchDriveFiles(response.access_token);
           }
@@ -97,6 +98,13 @@ const WallView: React.FC<WallViewProps> = ({
       });
     }
   }, []);
+
+  // Fetch drive files if token exists but no files loaded
+  useEffect(() => {
+    if (driveToken && driveFiles.length === 0 && showSettings && bgPickerTab === 'drive') {
+      fetchDriveFiles(driveToken);
+    }
+  }, [driveToken, showSettings, bgPickerTab, driveFiles.length]);
 
   const fetchDriveFiles = async (token: string) => {
     try {
@@ -107,40 +115,13 @@ const WallView: React.FC<WallViewProps> = ({
         if (res.ok) {
             const data = await res.json();
             setDriveFiles(data.files || []);
+        } else if (res.status === 401) {
+            // Token expired
+            sessionStorage.removeItem('google_drive_token');
+            setDriveToken(null);
         }
     } catch (e) { console.error(e); }
   };
-
-  const scheduleOptimisticCleanup = (postId: string) => {
-    if (optimisticTimers.current.has(postId)) clearTimeout(optimisticTimers.current.get(postId)!);
-    const timer = setTimeout(() => {
-      optimisticPosts.current.delete(postId);
-      optimisticTimers.current.delete(postId);
-    }, 5000); 
-    optimisticTimers.current.set(postId, timer);
-  };
-
-  const zoomFit = useCallback(() => {
-    if (!wall || wall.posts.length === 0 || !isCanvasMode) { setZoom(1); setPan({ x: 0, y: 0 }); return; }
-    const padding = 100;
-    const minX = Math.min(...wall.posts.map(p => p.x));
-    const maxX = Math.max(...wall.posts.map(p => p.x + 300));
-    const minY = Math.min(...wall.posts.map(p => p.y));
-    const maxY = Math.max(...wall.posts.map(p => p.y + 250));
-    const contentWidth = maxX - minX;
-    const contentHeight = maxY - minY;
-    const containerWidth = containerRef.current?.clientWidth || window.innerWidth;
-    const containerHeight = containerRef.current?.clientHeight || window.innerHeight;
-    if (contentWidth <= 0 || contentHeight <= 0) return;
-    const scaleX = (containerWidth - padding) / contentWidth;
-    const scaleY = (containerHeight - padding) / contentHeight;
-    const newZoom = Math.min(Math.min(scaleX, scaleY), 1);
-    setZoom(newZoom);
-    setPan({ 
-      x: (containerWidth / 2) - ((minX + contentWidth / 2) * newZoom),
-      y: (containerHeight / 2) - ((minY + contentHeight / 2) * newZoom)
-    });
-  }, [wall, isCanvasMode]);
 
   const syncWall = useCallback(async () => {
     if (Date.now() - lastInteractionTime.current < 500) return;
@@ -172,6 +153,28 @@ const WallView: React.FC<WallViewProps> = ({
       } else { setError("Wall not found."); }
     } catch (err: any) { console.error("Sync error:", err); } finally { setIsSyncing(false); }
   }, [wallId]);
+
+  const zoomFit = useCallback(() => {
+    if (!wall || wall.posts.length === 0 || !isCanvasMode) { setZoom(1); setPan({ x: 0, y: 0 }); return; }
+    const padding = 100;
+    const minX = Math.min(...wall.posts.map(p => p.x));
+    const maxX = Math.max(...wall.posts.map(p => p.x + 300));
+    const minY = Math.min(...wall.posts.map(p => p.y));
+    const maxY = Math.max(...wall.posts.map(p => p.y + 250));
+    const contentWidth = maxX - minX;
+    const contentHeight = maxY - minY;
+    const containerWidth = containerRef.current?.clientWidth || window.innerWidth;
+    const containerHeight = containerRef.current?.clientHeight || window.innerHeight;
+    if (contentWidth <= 0 || contentHeight <= 0) return;
+    const scaleX = (containerWidth - padding) / contentWidth;
+    const scaleY = (containerHeight - padding) / contentHeight;
+    const newZoom = Math.min(Math.min(scaleX, scaleY), 1);
+    setZoom(newZoom);
+    setPan({ 
+      x: (containerWidth / 2) - ((minX + contentWidth / 2) * newZoom),
+      y: (containerHeight / 2) - ((minY + contentHeight / 2) * newZoom)
+    });
+  }, [wall, isCanvasMode]);
 
   useEffect(() => {
     if (wall && wall.posts.length > 0 && isCanvasMode && !hasInitialZoomed.current) {
@@ -321,7 +324,7 @@ const WallView: React.FC<WallViewProps> = ({
       const finalY = (prev.type === 'timeline' && !targetPost?.parentId) ? TIMELINE_AXIS_Y : y;
       const updatedPosts = prev.posts.map(p => p.id === id ? { ...p, x, y: finalY, zIndex: maxZ + 1 } : p);
       const movedPost = updatedPosts.find(p => p.id === id);
-      if (movedPost) { optimisticPosts.current.set(id, movedPost); scheduleOptimisticCleanup(id); }
+      if (movedPost) { optimisticPosts.current.set(id, movedPost); }
       return { ...prev, posts: updatedPosts };
     });
   };
@@ -360,7 +363,6 @@ const WallView: React.FC<WallViewProps> = ({
     if (savedPost) {
       optimisticPosts.current.delete(tempId);
       optimisticPosts.current.set(savedPost.id, savedPost);
-      scheduleOptimisticCleanup(savedPost.id);
       setWall(prev => prev ? ({ ...prev, posts: prev.posts.map(p => p.id === tempId ? savedPost : p) }) : null);
     }
   };
@@ -391,7 +393,7 @@ const WallView: React.FC<WallViewProps> = ({
         const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
         const response = await ai.models.generateContent({
             model: 'gemini-3-flash-preview',
-            contents: `Search Google to find a high-quality, professional, direct image URL (ending in .jpg, .png, etc.) for a background related to "${bgSearch}". Return ONLY the raw direct image URL string, no markdown, no other text. Ensure the URL is publicly accessible.`,
+            contents: `Find a direct URL to a high-quality, professional, widescreen image for a digital wall background related to "${bgSearch}". The URL MUST end in .jpg or .png and be publicly accessible. Return ONLY the URL string.`,
             config: { tools: [{ googleSearch: {} }] }
         });
         const url = response.text.trim().replace(/`/g, '');
@@ -521,7 +523,7 @@ const WallView: React.FC<WallViewProps> = ({
                       isTimelineMilestone={true}
                     >
                       {getAttachments(milestone.id).map(attachment => (
-                        <div key={attachment.id} className="scale-90 opacity-90 hover:opacity-100 hover:scale-95 transition-all">
+                        <div key={attachment.id} className="scale-90 opacity-90 hover:opacity-100 hover:scale-95 transition-all w-[300px]">
                           <Post 
                             post={{...attachment, x: 0, y: 0}} zoom={1}
                             onDelete={(id) => { setWall(prev => prev ? ({ ...prev, posts: prev.posts.filter(p => p.id !== id) }) : null); onDeletePost(id); }} 
@@ -639,7 +641,7 @@ const WallView: React.FC<WallViewProps> = ({
                     ))}
                 </div>
 
-                <div className="min-h-[140px] p-4 bg-slate-50 rounded-2xl border border-slate-200">
+                <div className="min-h-[160px] p-4 bg-slate-50 rounded-2xl border border-slate-200">
                     {bgPickerTab === 'presets' && (
                         <div className="grid grid-cols-4 gap-3">
                             {WALL_GRADIENTS.map(g => (
@@ -673,14 +675,14 @@ const WallView: React.FC<WallViewProps> = ({
                                     <button onClick={() => driveTokenClient.current?.requestAccessToken()} className="px-6 py-2 bg-slate-800 text-white rounded-lg text-xs font-bold">Connect Google Drive</button>
                                 </div>
                             ) : (
-                                <div className="grid grid-cols-4 gap-2 h-32 overflow-y-auto custom-scrollbar pr-2">
+                                <div className="grid grid-cols-4 gap-3 h-40 overflow-y-auto custom-scrollbar pr-2 p-1">
                                     {driveFiles.map(file => {
                                         const directLink = file.thumbnailLink?.replace(/=s\d+$/, '=s0');
                                         const wallLink = directLink || file.webViewLink;
                                         return (
-                                            <button key={file.id} onClick={() => setSettingsForm({ ...settingsForm, background: wallLink })} className="relative aspect-square bg-white rounded-lg overflow-hidden border border-slate-200 group">
-                                                <img src={file.thumbnailLink} className="w-full h-full object-cover" alt="" referrerPolicy="no-referrer" />
-                                                {settingsForm.background === wallLink && <div className="absolute inset-0 bg-cyan-600/40 flex items-center justify-center"><Check className="text-white" size={20} /></div>}
+                                            <button key={file.id} onClick={() => setSettingsForm({ ...settingsForm, background: wallLink })} className="relative block aspect-square w-full rounded-xl overflow-hidden border-2 border-slate-200 group">
+                                                <img src={file.thumbnailLink} className="absolute inset-0 w-full h-full object-cover" alt="" referrerPolicy="no-referrer" />
+                                                {settingsForm.background === wallLink && <div className="absolute inset-0 bg-cyan-600/40 flex items-center justify-center"><Check className="text-white" size={24} strokeWidth={3} /></div>}
                                             </button>
                                         );
                                     })}
@@ -709,11 +711,11 @@ const WallView: React.FC<WallViewProps> = ({
                                     <input type="text" placeholder="Space, Nature, Art..." className="w-full px-4 py-3 pl-10 bg-white border border-slate-200 rounded-xl text-xs text-slate-800 outline-none focus:ring-2 focus:ring-cyan-500/20" value={bgSearch} onChange={e => setBgSearch(e.target.value)} onKeyDown={e => e.key === 'Enter' && performBgSearch()} />
                                     <Search className="absolute left-3.5 top-3.5 text-slate-400" size={14} />
                                 </div>
-                                <button onClick={performBgSearch} disabled={isBgSearching} className="px-6 py-2 bg-indigo-600 text-white rounded-xl text-xs font-bold disabled:opacity-50">
+                                <button onClick={performBgSearch} disabled={isBgSearching} className="px-6 py-2 bg-slate-900 text-white rounded-xl text-xs font-bold disabled:opacity-50">
                                     {isBgSearching ? <Loader2 className="animate-spin" size={14} /> : 'Search'}
                                 </button>
                             </div>
-                            <p className="text-[10px] text-slate-500 font-bold uppercase tracking-widest">Uses Gemini to find the perfect background</p>
+                            <p className="text-[10px] text-slate-500 font-bold uppercase tracking-widest">Finding the perfect high-quality background...</p>
                             {isImageBackground && !settingsForm.background?.includes('data:image') && (
                                 <img src={settingsForm.background} className="h-12 w-20 object-cover rounded-lg mx-auto border" alt="Search Result Preview" />
                             )}

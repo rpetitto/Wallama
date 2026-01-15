@@ -37,7 +37,7 @@ const mapPostFromDB = (dbPost: any): Post => {
     content: dbPost.content || '',
     authorName: dbPost.author_name || 'Anonymous',
     authorId: dbPost.author_id || '',
-    // Removed authorAvatar mapping since column is missing in user's current schema
+    // author_avatar removed as it is not in the user's provided schema
     createdAt: dbPost.created_at ? new Date(dbPost.created_at).getTime() : Date.now(),
     x: Number(dbPost.x) || 0,
     y: Number(dbPost.y) || 0,
@@ -67,6 +67,8 @@ export const databaseService = {
 
   async getStudentWalls(userId: string): Promise<Wall[]> {
     try {
+      // Note: If you don't have wall_members table yet, this might fail.
+      // For now, we assume user ran the SQL.
       const { data: memberData, error: memberError } = await supabase
         .from('wall_members')
         .select('wall_id, last_accessed_at')
@@ -189,7 +191,7 @@ export const databaseService = {
         content: post.content || '',
         author_name: post.authorName || 'Anonymous',
         author_id: post.authorId || 'anon',
-        // Removed author_avatar because it's not in user's provided schema
+        // author_avatar is not in provided schema, so we do not send it
         x: Math.round(post.x || 100),
         y: Math.round(post.y || 100),
         z_index: Math.round(nextZ),

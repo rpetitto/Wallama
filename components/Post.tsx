@@ -185,20 +185,35 @@ const Post: React.FC<PostProps> = ({
   const displayName = isWallAnonymous ? 'Anonymous' : post.authorName;
   const isHexColor = post.color?.startsWith('#');
   
+  // Outer wrapper styling for Timeline layout
+  const wrapperStyle: React.CSSProperties = isTimelineMilestone ? {
+    position: 'absolute',
+    left: post.x,
+    top: post.y,
+    width: '300px', // Standard card width
+    zIndex: isDragging ? 9999 : post.zIndex,
+  } : {};
+
+  // Card container styling
   const containerStyle: React.CSSProperties = {
-    left: (post.x !== 0 || post.y !== 0 || isTimelineMilestone) ? post.x : undefined,
-    top: (post.x !== 0 || post.y !== 0 || isTimelineMilestone) ? post.y : undefined,
+    // If it's a milestone, the outer wrapper handles X/Y, so this is relative
+    // If it's a standard freeform post, it's absolute
+    left: (!isTimelineMilestone && (post.x !== 0 || post.y !== 0)) ? post.x : undefined,
+    top: (!isTimelineMilestone && (post.x !== 0 || post.y !== 0)) ? post.y : undefined,
     zIndex: isDragging ? 9999 : post.zIndex,
     backgroundColor: isHexColor ? post.color : undefined,
-    position: (post.x !== 0 || post.y !== 0 || isTimelineMilestone) ? 'absolute' : 'relative'
+    position: (!isTimelineMilestone && (post.x !== 0 || post.y !== 0)) ? 'absolute' : 'relative'
   };
   
-  const containerClass = `post-container p-4 w-full sm:w-[300px] rounded-2xl shadow-lg border border-black/5 transition-all duration-75 ${!isHexColor ? post.color : ''} group select-none ${isDragging ? 'shadow-2xl z-[9999] scale-[1.02] cursor-grabbing' : (canDrag ? 'cursor-grab' : 'cursor-default')} hover:shadow-2xl ${isTimelineMilestone ? 'mt-8' : ''}`;
+  const containerClass = `post-container p-4 w-full rounded-2xl shadow-lg border border-black/5 transition-all duration-75 ${!isHexColor ? post.color : ''} group select-none ${isDragging ? 'shadow-2xl z-[9999] scale-[1.02] cursor-grabbing' : (canDrag ? 'cursor-grab' : 'cursor-default')} hover:shadow-2xl`;
 
   return (
-    <div className={`flex flex-col items-center gap-4 ${isTimelineMilestone ? 'pointer-events-auto' : ''}`}>
+    <div 
+      className={`flex flex-col items-center gap-4 ${isTimelineMilestone ? 'pointer-events-auto' : ''}`}
+      style={wrapperStyle}
+    >
       {isTimelineMilestone && (
-        <div className="h-10 w-1.5 bg-white/50 shadow-sm rounded-full mb-[-8px]" />
+        <div className="h-10 w-1.5 bg-white/50 shadow-sm rounded-full mb-[-12px]" />
       )}
       <div 
         className={containerClass}
@@ -273,7 +288,7 @@ const Post: React.FC<PostProps> = ({
       
       {/* Nested detail posts for Timeline */}
       {children && (
-        <div className="flex flex-col items-center gap-4 w-full mt-4">
+        <div className="flex flex-col items-center gap-4 w-full">
            {children}
         </div>
       )}
