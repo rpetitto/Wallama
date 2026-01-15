@@ -192,91 +192,94 @@ const Post: React.FC<PostProps> = ({
 
   const displayName = isWallAnonymous ? 'Anonymous' : post.authorName;
   const isHexColor = post.color?.startsWith('#');
-  
-  const wrapperStyle: React.CSSProperties = isTimelineMilestone ? {
-    position: 'absolute',
-    left: post.x,
-    top: post.y,
-    width: '300px',
-    zIndex: isDragging ? 9999 : post.zIndex,
-  } : {};
+  const isAbsolute = (isTimelineMilestone) || (!isTimelineMilestone && (post.x !== 0 || post.y !== 0));
 
   const containerStyle: React.CSSProperties = {
-    left: (!isTimelineMilestone && (post.x !== 0 || post.y !== 0)) ? post.x : undefined,
-    top: (!isTimelineMilestone && (post.x !== 0 || post.y !== 0)) ? post.y : undefined,
+    left: isAbsolute ? post.x : undefined,
+    top: isAbsolute ? post.y : undefined,
     zIndex: isDragging ? 9999 : post.zIndex,
     backgroundColor: isHexColor ? post.color : undefined,
-    position: (!isTimelineMilestone && (post.x !== 0 || post.y !== 0)) ? 'absolute' : 'relative'
+    position: isAbsolute ? 'absolute' : 'relative',
+    width: isAbsolute ? '300px' : '100%' // Crucial fix: constraint width on canvas
   };
   
-  const containerClass = `post-container p-4 w-full rounded-2xl shadow-lg border border-black/5 transition-all duration-75 ${!isHexColor ? post.color : ''} group select-none ${isDragging ? 'shadow-2xl z-[9999] scale-[1.02] cursor-grabbing' : (canDrag ? 'cursor-grab' : 'cursor-default')} hover:shadow-2xl`;
+  const containerClass = `post-container p-4 rounded-2xl shadow-lg border border-black/5 transition-all duration-75 ${!isHexColor ? post.color : ''} group select-none ${isDragging ? 'shadow-2xl z-[9999] scale-[1.02] cursor-grabbing' : (canDrag ? 'cursor-grab' : 'cursor-default')} hover:shadow-2xl`;
 
-  return (
-    <div className={`flex flex-col items-center gap-2 ${isTimelineMilestone ? 'pointer-events-auto' : ''}`} style={wrapperStyle}>
-      {isTimelineMilestone && <div className="h-10 w-1.5 bg-white/50 shadow-sm rounded-full mb-[-8px]" />}
-      <div className={containerClass} style={containerStyle} onMouseDown={handleMouseDown}>
-        <div className="flex items-center justify-between mb-3">
-          <div className="flex items-center gap-2">
-            <div className="h-6 w-6 rounded-full overflow-hidden bg-white/40 border border-black/5 flex items-center justify-center">
-              {post.authorAvatar && !isWallAnonymous ? (
-                <img src={post.authorAvatar} className="h-full w-full object-cover" alt="" referrerPolicy="no-referrer" />
-              ) : (
-                <User size={12} className="text-slate-600" />
-              )}
-            </div>
-            <span className="text-xs font-bold text-slate-800 truncate max-w-[120px]">{displayName}</span>
-          </div>
-          <div className="flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
-            {isWallFrozen && <Lock size={14} className="text-slate-400 mr-2" />}
-            {isOwner && onEdit && !isWallFrozen && (
-              <button onClick={(e) => { e.stopPropagation(); onEdit(post.id); }} className="p-1.5 text-slate-500 hover:text-cyan-600 hover:bg-cyan-50 rounded-lg transition-colors">
-                <Pencil size={14} />
-              </button>
-            )}
-            {isOwner && !isWallFrozen && (
-              <button onClick={(e) => { e.stopPropagation(); onDelete(post.id); }} className="p-1.5 text-slate-500 hover:text-red-500 hover:bg-red-50 rounded-lg transition-colors">
-                <Trash2 size={14} />
-              </button>
-            )}
-            {isOwner && !isWallFrozen && !isTimelineMilestone && (post.x !== 0 || post.y !== 0) && (
-              <div className="p-1.5 text-slate-400"><GripHorizontal size={16} /></div>
+  const PostContent = (
+    <div className={containerClass} style={containerStyle} onMouseDown={handleMouseDown}>
+      <div className="flex items-center justify-between mb-3">
+        <div className="flex items-center gap-2">
+          <div className="h-6 w-6 rounded-full overflow-hidden bg-white/40 border border-black/5 flex items-center justify-center">
+            {post.authorAvatar && !isWallAnonymous ? (
+              <img src={post.authorAvatar} className="h-full w-full object-cover" alt="" referrerPolicy="no-referrer" />
+            ) : (
+              <User size={12} className="text-slate-600" />
             )}
           </div>
+          <span className="text-xs font-bold text-slate-800 truncate max-w-[120px]">{displayName}</span>
         </div>
-
-        <div className="min-h-[40px]">
-          {renderContent()}
-          {(post.type !== 'title' && (post.type as string) !== 'text' && post.metadata?.caption) && (
-            <div className="mt-3 pt-3 border-t border-black/5 bg-white/40 -mx-4 px-4 pb-1 rounded-b-xl shadow-inner">
-              <p className="text-sm text-slate-900 font-bold italic flex gap-2">
-                <Quote size={12} className="text-indigo-500 flex-shrink-0 mt-0.5" />
-                {post.metadata.caption}
-              </p>
-            </div>
+        <div className="flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
+          {isWallFrozen && <Lock size={14} className="text-slate-400 mr-2" />}
+          {isOwner && onEdit && !isWallFrozen && (
+            <button onClick={(e) => { e.stopPropagation(); onEdit(post.id); }} className="p-1.5 text-slate-500 hover:text-cyan-600 hover:bg-cyan-50 rounded-lg transition-colors">
+              <Pencil size={14} />
+            </button>
+          )}
+          {isOwner && !isWallFrozen && (
+            <button onClick={(e) => { e.stopPropagation(); onDelete(post.id); }} className="p-1.5 text-slate-500 hover:text-red-500 hover:bg-red-50 rounded-lg transition-colors">
+              <Trash2 size={14} />
+            </button>
+          )}
+          {isOwner && !isWallFrozen && isAbsolute && !isTimelineMilestone && (
+            <div className="p-1.5 text-slate-400"><GripHorizontal size={16} /></div>
           )}
         </div>
+      </div>
 
-        <div className="mt-4 pt-3 border-t border-black/5 flex items-center justify-between">
-          <div className="flex items-center gap-1 text-[10px] text-slate-600 font-black uppercase tracking-wider">
-            <Clock size={10} /> {relativeTime}
+      <div className="min-h-[40px]">
+        {renderContent()}
+        {(post.type !== 'title' && (post.type as string) !== 'text' && post.metadata?.caption) && (
+          <div className="mt-3 pt-3 border-t border-black/5 bg-white/40 -mx-4 px-4 pb-1 rounded-b-xl shadow-inner">
+            <p className="text-sm text-slate-900 font-bold italic flex gap-2">
+              <Quote size={12} className="text-indigo-500 flex-shrink-0 mt-0.5" />
+              {post.metadata.caption}
+            </p>
           </div>
+        )}
+      </div>
+
+      <div className="mt-4 pt-3 border-t border-black/5 flex items-center justify-between">
+        <div className="flex items-center gap-1 text-[10px] text-slate-600 font-black uppercase tracking-wider">
+          <Clock size={10} /> {relativeTime}
         </div>
       </div>
-      
-      {/* Tiny FAB for adding details in timeline mode */}
-      {!isWallFrozen && onAddDetail && isTimelineMilestone && (
-        <button 
-          onClick={(e) => { e.stopPropagation(); onAddDetail(post.id); }}
-          className="mt-2 h-10 w-10 bg-cyan-600 text-white rounded-full shadow-lg flex items-center justify-center hover:scale-110 active:scale-95 transition-all animate-in zoom-in-50 duration-200 border-2 border-white/50"
-          title="Add Detail to Milestone"
-        >
-          <Plus size={20} />
-        </button>
-      )}
-
-      {children && <div className="flex flex-col items-center gap-4 w-full mt-4">{children}</div>}
     </div>
   );
+
+  if (isTimelineMilestone) {
+    return (
+      <div className="flex flex-col items-center gap-2 pointer-events-none" style={{ position: 'absolute', left: post.x, top: post.y, width: '300px', zIndex: isDragging ? 9999 : post.zIndex }}>
+        <div className="h-10 w-1.5 bg-white/50 shadow-sm rounded-full mb-[-8px]" />
+        <div className="pointer-events-auto w-full">
+          {PostContent}
+        </div>
+        
+        {!isWallFrozen && onAddDetail && (
+          <button 
+            onClick={(e) => { e.stopPropagation(); onAddDetail(post.id); }}
+            className="mt-3 h-10 w-10 bg-indigo-600 text-white rounded-full shadow-lg flex items-center justify-center hover:scale-110 active:scale-95 transition-all animate-in zoom-in-50 duration-300 border-2 border-white/50 group pointer-events-auto"
+            title="Add Detail to Milestone"
+          >
+            <Plus size={20} className="group-hover:rotate-90 transition-transform duration-300" />
+          </button>
+        )}
+
+        {children && <div className="flex flex-col items-center gap-4 w-full mt-4 pointer-events-auto">{children}</div>}
+      </div>
+    );
+  }
+
+  return PostContent;
 };
 
 export default Post;
