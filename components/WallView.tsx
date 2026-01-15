@@ -304,6 +304,8 @@ const WallView: React.FC<WallViewProps> = ({
       let updatedPosts = [...prev.posts];
       const targetPost = updatedPosts.find(p => p.id === id);
       if (!targetPost) return prev;
+      
+      let newParentId = targetPost.parentId;
 
       if ((prev.type as string) === 'timeline' && !targetPost.parentId) {
         // Timeline logic...
@@ -345,6 +347,7 @@ const WallView: React.FC<WallViewProps> = ({
 
                   if (targetColumn && targetColumn.id !== targetPost.parentId) {
                       // Switch Parent Live!
+                      newParentId = targetColumn.id;
                       updatedPosts = updatedPosts.map(p => p.id === id ? { ...p, parentId: targetColumn.id, y } : p);
                   } else {
                       // Same Parent, just update Y
@@ -355,7 +358,7 @@ const WallView: React.FC<WallViewProps> = ({
               // Just update X/Y (Columns or simple move)
               updatedPosts = updatedPosts.map(p => p.id === id ? { ...p, x, y } : p);
           }
-          optimisticPosts.current.set(id, { ...targetPost, x, y });
+          optimisticPosts.current.set(id, { ...targetPost, x, y, parentId: newParentId });
       } else {
         const finalY = ((prev.type as string) === 'timeline' && !targetPost.parentId) ? TIMELINE_AXIS_Y : y;
         updatedPosts = updatedPosts.map(p => p.id === id ? { ...p, x, y: finalY } : p);
@@ -387,11 +390,25 @@ const WallView: React.FC<WallViewProps> = ({
        await Promise.all(promises);
 
     } else if ((wall?.type as string) === 'kanban') {
-       const movedPost = wall.posts.find(p => p.id === id);
-       if (!movedPost) return;
+       // Look up the latest state from optimisticPosts ref to get the correct parentId
+       // The 'wall' variable in this closure might be stale (from drag start), so we can't rely on it for the new parentId
+       const optimisticState = optimisticPosts.current.get(id);
+       const originalPost = wall.posts.find(p => p.id === id);
+       
+       if (originalPost?.parentId) {
+           // It's a card
+           const finalParentId = optimisticState?.parentId || originalPost.parentId;
+           const finalY = optimisticState?.y !== undefined ? optimisticState.y : y;
 
-       if (!movedPost.parentId) {
+           if (finalParentId !== originalPost.parentId) {
+               await onEditPost(id, { parentId: finalParentId });
+           }
+           await onMovePost(id, 0, finalY); 
+       } else {
            // Column Drop
+           const movedPost = originalPost;
+           if (!movedPost) return;
+
            const colWidth = KANBAN_COLUMN_WIDTH;
            const proposedIdx = Math.max(0, Math.round((x - KANBAN_START_X) / colWidth));
            const columns = wall.posts.filter(p => !p.parentId && p.id !== id).sort((a, b) => a.x - b.x);
@@ -409,12 +426,6 @@ const WallView: React.FC<WallViewProps> = ({
            })}) : null);
 
            await Promise.all(updates.map(u => onMovePost(u.id, u.x, u.y)));
-       } else {
-           // Card Drop (Logic handled live in handlePostMove, just save final state)
-           // We need to persist parentId changes if they happened live.
-           // wall state is already updated. Just push to DB.
-           await onEditPost(id, { parentId: movedPost.parentId });
-           await onMovePost(id, 0, y); 
        }
     } else {
        await onMovePost(id, x, y);
