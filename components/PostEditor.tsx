@@ -432,7 +432,7 @@ const PostEditor: React.FC<PostEditorProps> = ({ onClose, onSubmit, authorName, 
             )}
 
             <div className="pt-2">
-              <label className="block text-xs font-black text-slate-400 uppercase tracking-widest mb-3">Card Color</label>
+              <label className="block text-xs font-black text-slate-400 uppercase tracking-widest mb-3">{isKanbanColumn ? 'Category Color' : 'Card Color'}</label>
               <div className="flex gap-3 overflow-x-auto pb-2">
                 {WALL_COLORS.map(color => (
                   <button key={color} onClick={() => setSelectedColor(color)} style={{ backgroundColor: color }} className={`h-10 w-10 rounded-full border-2 transition-all shrink-0 ${selectedColor === color ? 'border-cyan-600 scale-110 shadow-lg' : 'border-black/10'}`} />
