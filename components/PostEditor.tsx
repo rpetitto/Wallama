@@ -134,6 +134,7 @@ const PostEditor: React.FC<PostEditorProps> = ({ onClose, onSubmit, authorName, 
         else setUrl(reader.result as string);
       };
       reader.readAsDataURL(file);
+      e.target.value = ''; // Reset input so same file can be selected again
     }
   };
 
@@ -253,11 +254,10 @@ const PostEditor: React.FC<PostEditorProps> = ({ onClose, onSubmit, authorName, 
     });
   };
 
-  const ImagePickerUI = () => (
+  const imagePicker = (
     <div className="space-y-4">
       <div className="flex gap-2 p-1 bg-black/5 rounded-xl overflow-x-auto">
         {[
-          // Presets removed for posts
           { id: 'upload', icon: Upload, label: 'Upload' },
           { id: 'drive', icon: HardDrive, label: 'Drive' },
           { id: 'url', icon: LinkIconSmall, label: 'URL' },
@@ -350,7 +350,7 @@ const PostEditor: React.FC<PostEditorProps> = ({ onClose, onSubmit, authorName, 
               <div className="space-y-4">
                 <div className="space-y-2">
                    <label className="text-xs font-black text-slate-400 uppercase tracking-widest ml-1">Header Image (Optional)</label>
-                   <ImagePickerUI />
+                   {imagePicker}
                 </div>
                 <div className="space-y-2">
                    <label className="text-xs font-black text-slate-400 uppercase tracking-widest ml-1">Headline (1-Line)</label>
@@ -380,7 +380,7 @@ const PostEditor: React.FC<PostEditorProps> = ({ onClose, onSubmit, authorName, 
             {type === 'image' && (
               <div className="space-y-2">
                  <label className="text-xs font-black text-slate-400 uppercase tracking-widest ml-1">Select Image Content</label>
-                 <ImagePickerUI />
+                 {imagePicker}
               </div>
             )}
 

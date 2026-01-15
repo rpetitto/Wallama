@@ -12,7 +12,7 @@ import { GoogleGenAI } from "@google/genai";
 declare const google: any;
 const GOOGLE_CLIENT_ID = "6888240288-5v0p6nsoi64q1puv1vpvk1njd398ra8b.apps.googleusercontent.com";
 
-const TIMELINE_AXIS_Y = 200;
+const TIMELINE_AXIS_Y = 300; // Updated for better positioning
 const MIN_MILESTONE_SPACING = 340; // 300px card + 40px gap
 
 interface WallViewProps {
@@ -513,8 +513,8 @@ const WallView: React.FC<WallViewProps> = ({
            >
              <div className="relative w-[10000px] h-[10000px]">
                {wall.type === 'timeline' && (
-                  /* Extended axis line spanning 60,000px for infinite effect */
-                  <div className="absolute top-[242px] left-[-30000px] w-[60000px] h-1 bg-white/40 shadow-sm z-0 pointer-events-none" />
+                  /* Axis line now perfectly synchronized with TIMELINE_AXIS_Y */
+                  <div className={`absolute left-[-30000px] w-[60000px] h-1 bg-white/60 shadow-md z-0 pointer-events-none`} style={{ top: `${TIMELINE_AXIS_Y}px` }} />
                )}
 
                {wall.type === 'timeline' ? (

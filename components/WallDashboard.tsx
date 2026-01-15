@@ -195,7 +195,10 @@ const WallDashboard: React.FC<WallDashboardProps> = ({
                                 <MoreVertical size={18} />
                             </button>
                             {openMenuId === wall.id && (
-                                <div className="absolute right-0 top-full mt-1 w-44 bg-white rounded-xl shadow-2xl border border-slate-100 py-1.5 z-[100] animate-in fade-in zoom-in-95 duration-200">
+                                <div 
+                                    className="absolute right-0 top-full mt-1 w-44 bg-white rounded-xl shadow-2xl border border-slate-100 py-1.5 z-[100] animate-in fade-in zoom-in-95 duration-200"
+                                    onClick={(e) => e.stopPropagation()}
+                                >
                                     <button 
                                         onClick={(e) => { e.stopPropagation(); setShareWall(wall); setOpenMenuId(null); }}
                                         className="w-full px-4 py-2.5 text-left text-xs font-bold text-slate-700 hover:bg-slate-50 flex items-center gap-3 transition-colors"
