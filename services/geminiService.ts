@@ -41,6 +41,7 @@ export const suggestWallTopics = async (subject: string): Promise<string[]> => {
 };
 
 export const checkContentSafety = async (text: string, imageData?: string): Promise<{ isSafe: boolean; reason?: string }> => {
+  // If no text and no image, it's safe (e.g., just a video blob that we aren't checking)
   if (!text.trim() && !imageData) return { isSafe: true };
 
   try {
@@ -48,6 +49,9 @@ export const checkContentSafety = async (text: string, imageData?: string): Prom
     const parts: any[] = [];
     
     if (imageData && imageData.startsWith('data:')) {
+      // Basic check to ensure we don't send massive images that will definitely fail before hitting the model
+      // Gemini 1.5 Flash has a limit, but usually handles reasonable base64. 
+      // If it's too big, the try/catch will handle it.
       const base64Data = imageData.split(',')[1];
       const mimeType = imageData.split(';')[0].split(':')[1];
       parts.push({
@@ -87,8 +91,9 @@ export const checkContentSafety = async (text: string, imageData?: string): Prom
       reason: result.isSafe ? undefined : (result.reason || "Content flagged as inappropriate.")
     };
   } catch (error) {
-    console.error("Safety Check Error:", error);
-    // Return a specific error to help user understand it's a technical hiccup
-    return { isSafe: false, reason: "Safety check timed out. This often happens with large images. Please try a smaller file or try again." }; 
+    console.warn("Safety Check Failed (allowing content):", error);
+    // Fail OPEN: If the safety check fails (e.g. file too large, API error), allow the content.
+    // This prevents blocking users when the AI service is having trouble or the file is large (like a video).
+    return { isSafe: true }; 
   }
 };

@@ -237,8 +237,18 @@ const PostEditor: React.FC<PostEditorProps> = ({ onClose, onSubmit, authorName, 
     if (type === 'title' && !submissionTitle && !submissionContent && !isKanbanColumn) return;
     if (isKanbanColumn && !submissionTitle && !submissionContent) return;
 
+    // Safety Check: Construct text payload.
+    // Crucially, avoid adding the base64 media content to the text check if it's a video/image/gif.
+    // This prevents hitting token limits or size errors with Gemini.
+    const textContentForSafety = (type === 'title' || type === 'text' || type === 'link' || type === 'drive') ? submissionContent : '';
+    const safetyPayload = `${submissionTitle} ${textContentForSafety} ${caption}`.trim();
+
     setIsCheckingSafety(true);
-    const safetyResult = await checkContentSafety(submissionTitle + ' ' + submissionContent + ' ' + caption, (type === 'image' && url.startsWith('data:')) ? url : undefined);
+    const safetyResult = await checkContentSafety(
+        safetyPayload, 
+        (type === 'image' && url.startsWith('data:')) ? url : undefined
+    );
+    
     if (!safetyResult.isSafe) {
       setIsCheckingSafety(false);
       setSafetyError(safetyResult.reason || "Inappropriate content.");

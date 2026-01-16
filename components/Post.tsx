@@ -40,6 +40,27 @@ const getRelativeTime = (timestamp: number): string => {
   return new Date(timestamp).toLocaleDateString();
 };
 
+const getVideoEmbedUrl = (url?: string) => {
+  if (!url) return null;
+  
+  // YouTube (Standard, Short, Embed, etc.)
+  const ytRegExp = /(?:youtube\.com\/(?:[^\/]+\/.+\/|(?:v|e(?:mbed)?)\/|.*[?&]v=)|youtu\.be\/|youtube\.com\/shorts\/)([^"&?\/\s]{11})/;
+  const ytMatch = url.match(ytRegExp);
+  if (ytMatch) return `https://www.youtube.com/embed/${ytMatch[1]}`;
+
+  // Vimeo
+  const vimeoRegExp = /(?:vimeo\.com\/)(\d+)/;
+  const vimeoMatch = url.match(vimeoRegExp);
+  if (vimeoMatch) return `https://player.vimeo.com/video/${vimeoMatch[1]}`;
+
+  // Loom
+  const loomRegExp = /(?:loom\.com\/share\/)([a-f0-9]+)/;
+  const loomMatch = url.match(loomRegExp);
+  if (loomMatch) return `https://www.loom.com/embed/${loomMatch[1]}`;
+
+  return null;
+};
+
 const Post: React.FC<PostProps> = ({ 
   post, onDelete, onEdit, onMove, onMoveEnd, onDragStart, onAddDetail, children, 
   isOwner, snapToGrid, isWallAnonymous, isWallFrozen, isTimelineMilestone, isKanbanColumn, isKanbanCard, zoom 
@@ -139,7 +160,7 @@ const Post: React.FC<PostProps> = ({
   const handleMouseDown = (e: React.MouseEvent) => {
     e.stopPropagation();
     if (!canDrag) return;
-    if ((e.target as HTMLElement).closest('button, video, a, input, [role="button"]')) return;
+    if ((e.target as HTMLElement).closest('button, video, iframe, a, input, [role="button"]')) return;
 
     initDrag(e.clientX, e.clientY);
     
@@ -161,7 +182,7 @@ const Post: React.FC<PostProps> = ({
   const handleTouchStart = (e: React.TouchEvent) => {
     e.stopPropagation();
     if (!canDrag) return;
-    if ((e.target as HTMLElement).closest('button, video, a, input, [role="button"]')) return;
+    if ((e.target as HTMLElement).closest('button, video, iframe, a, input, [role="button"]')) return;
 
     const touch = e.touches[0];
     initDrag(touch.clientX, touch.clientY);
@@ -223,6 +244,20 @@ const Post: React.FC<PostProps> = ({
       case 'gif':
         return <img src={post.content} alt="GIF" className="w-full h-auto rounded-lg mb-2 pointer-events-none" />;
       case 'link':
+        const videoEmbedUrl = getVideoEmbedUrl(post.metadata?.url || post.content);
+        if (videoEmbedUrl) {
+           return (
+             <div className="w-full aspect-video rounded-xl overflow-hidden mb-2 bg-black shadow-sm border border-black/5 relative group">
+                <iframe
+                    src={videoEmbedUrl}
+                    className="w-full h-full"
+                    frameBorder="0"
+                    allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture"
+                    allowFullScreen
+                />
+             </div>
+           );
+        }
         return (
           <a href={post.metadata?.url} target="_blank" rel="noopener noreferrer" className="block bg-white/60 rounded-xl overflow-hidden hover:bg-white/90 transition-all border border-black/5 group shadow-sm">
             {post.metadata?.image && (
