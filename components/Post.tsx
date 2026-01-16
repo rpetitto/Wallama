@@ -331,7 +331,7 @@ const Post: React.FC<PostProps> = ({
     left: isFixedDrag ? visualStartPos.current.x : (isDragging ? postStartPos.current.x : ((isAbsolute && !isWrapperControlled) ? post.x : undefined)),
     top: isFixedDrag ? visualStartPos.current.y : (isDragging ? postStartPos.current.y : ((isAbsolute && !isWrapperControlled) ? post.y : undefined)),
     
-    transform: isDragging ? `translate(${dragDelta.x}px, ${dragDelta.y}px) rotate(2deg) scale(1.05)` : undefined,
+    transform: (isDragging && !isKanbanColumn) ? `translate(${dragDelta.x}px, ${dragDelta.y}px) rotate(2deg) scale(1.05)` : undefined,
     zIndex: isDragging ? 99999 : post.zIndex,
     
     backgroundColor: isHexColor ? post.color : undefined,
@@ -462,26 +462,44 @@ const Post: React.FC<PostProps> = ({
   }
 
   if (isKanbanColumn) {
+     const draggingStyle: React.CSSProperties = isDragging ? {
+         left: postStartPos.current.x + dragDelta.x,
+         top: 0,
+         zIndex: 9999,
+         transform: 'rotate(2deg) scale(1.05)',
+         transition: 'none'
+     } : {
+         left: post.x,
+         top: 0,
+         zIndex: 1,
+         transition: 'all 0.2s cubic-bezier(0.2, 0, 0, 1)'
+     };
+
      return (
         <div 
             className="absolute flex flex-col items-center pointer-events-none" 
-            style={{ left: post.x, top: 0, width: '320px', height: '100%', zIndex: isDragging ? 9999 : 1 }}
+            style={{ 
+                ...draggingStyle,
+                width: '320px', 
+                height: '100%' 
+            }}
         >
-            <div className="w-full pointer-events-auto mb-4">
+            <div className="w-full pointer-events-auto mb-6 relative z-10">
                 {PostContent}
-            </div>
-            
-            <div className="w-full flex-1 flex flex-col gap-3 pointer-events-auto px-1 pb-20">
-                {children}
+                
                 {!isWallFrozen && onAddDetail && (
                     <button 
                         onClick={(e) => { e.stopPropagation(); onAddDetail(post.id); }}
-                        onTouchStart={(e) => { e.stopPropagation(); onAddDetail(post.id); }}
-                        className="w-full py-3 border-2 border-dashed border-slate-300 rounded-2xl text-slate-400 font-bold hover:bg-white/50 hover:border-cyan-400 hover:text-cyan-600 transition-colors flex items-center justify-center gap-2"
+                        className="absolute -bottom-4 left-1/2 -translate-x-1/2 h-8 w-8 bg-white text-indigo-600 rounded-full border border-indigo-100 shadow-md flex items-center justify-center hover:bg-indigo-600 hover:text-white transition-all z-20"
+                        title="Add Card"
                     >
-                        <Plus size={16} /> Add Card
+                        <Plus size={16} />
                     </button>
                 )}
+            </div>
+            
+            <div className="w-full flex-1 flex flex-col gap-3 pointer-events-auto px-1 pb-20 overflow-visible">
+                {children}
             </div>
         </div>
      )
