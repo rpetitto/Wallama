@@ -14,7 +14,8 @@
     "@google/genai": "^1.35.0",
     "lucide-react": "^0.562.0",
     "@supabase/supabase-js": "2",
-    "marked": "15.0.0"
+    "marked": "15.0.0",
+    "emoji-picker-react": "4.5.16"
   },
   "devDependencies": {
     "@types/node": "^22.14.0",

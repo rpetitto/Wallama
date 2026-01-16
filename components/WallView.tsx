@@ -4,10 +4,11 @@ import { Wall, Post as PostType, UserRole, ClassroomCourse, WallType } from '../
 import Post from './Post';
 import PostEditor from './PostEditor';
 import { ChevronLeft, Plus, Share2, Settings, X, Check, ZoomIn, ZoomOut, Maximize, Loader2, AlertCircle, LayoutGrid, Lock, Unlock, Image as ImageIcon, Copy, Search, School, Trash2, ShieldAlert, Upload, HardDrive, Link as LinkIcon, Sparkles, Grip, Layers, List, History, Kanban } from 'lucide-react';
-import { WALL_GRADIENTS, POPULAR_EMOJIS } from '../constants';
+import { WALL_GRADIENTS } from '../constants';
 import { databaseService } from '../services/databaseService';
 import { classroomService } from '../services/classroomService';
 import { GoogleGenAI } from "@google/genai";
+import EmojiPicker from 'emoji-picker-react';
 
 declare const google: any;
 const GOOGLE_CLIENT_ID = "6888240288-5v0p6nsoi64q1puv1vpvk1njd398ra8b.apps.googleusercontent.com";
@@ -51,7 +52,6 @@ const WallView: React.FC<WallViewProps> = ({
   const [showShareOverlay, setShowShareOverlay] = useState(false);
   const [showCopyToast, setShowCopyToast] = useState(false);
   const [showEmojiPicker, setShowEmojiPicker] = useState(false);
-  const [emojiSearch, setEmojiSearch] = useState('');
   
   const [showClassroomModal, setShowClassroomModal] = useState(false);
   const [courses, setCourses] = useState<ClassroomCourse[]>([]);
@@ -229,9 +229,6 @@ const WallView: React.FC<WallViewProps> = ({
     if (isInteractionBlocked || !isCanvasMode) return;
     if ((e.target as HTMLElement).closest('.post-container, .modal-overlay, header, .fixed')) return;
     
-    // Prevent default to avoid iOS rubber banding
-    // e.preventDefault(); // Don't prevent default on start, it might block scrolling in non-canvas parts if mixed
-
     const touch = e.touches[0];
     isPanning.current = true;
     lastMousePos.current = { x: touch.clientX, y: touch.clientY };
@@ -304,19 +301,49 @@ const WallView: React.FC<WallViewProps> = ({
   }, [isInteractionBlocked, wall?.type, isCanvasMode]); 
 
   const findSmartSlot = (posts: PostType[]) => {
+    const rootPosts = posts.filter(p => !p.parentId);
+
     if ((wall?.type as string) === 'timeline') {
-       const milestones = posts.filter(p => !p.parentId);
+       const milestones = rootPosts;
        const slotCount = milestones.length;
        return { x: slotCount * MIN_MILESTONE_SPACING, y: TIMELINE_AXIS_Y };
     }
     if ((wall?.type as string) === 'kanban') {
-       const columns = posts.filter(p => !p.parentId);
+       const columns = rootPosts;
        const slotCount = columns.length;
        return { x: KANBAN_START_X + (slotCount * KANBAN_COLUMN_WIDTH), y: 50 };
     }
-    if (posts.length === 0) return { x: 100, y: 100 };
-    const maxX = Math.max(...posts.map(p => p.x + 300));
-    return { x: maxX + 50, y: 100 };
+    
+    // Freeform logic (Staircase/Cluster packing)
+    if (rootPosts.length === 0) return { x: 100, y: 100 };
+
+    let minX = Infinity, maxX = -Infinity, minY = Infinity, maxY = -Infinity;
+    let rightmostPost = rootPosts[0];
+    let bottommostPost = rootPosts[0];
+
+    rootPosts.forEach(p => {
+        if (p.x < minX) minX = p.x;
+        if (p.x > maxX) maxX = p.x;
+        if (p.y < minY) minY = p.y;
+        if (p.y > maxY) maxY = p.y;
+
+        // Tie-break: prefer bottom-right
+        if (p.x > rightmostPost.x || (p.x === rightmostPost.x && p.y > rightmostPost.y)) rightmostPost = p;
+        if (p.y > bottommostPost.y || (p.y === bottommostPost.y && p.x > bottommostPost.x)) bottommostPost = p;
+    });
+
+    const boxWidth = (maxX + 300) - minX;
+    const boxHeight = (maxY + 200) - minY; 
+
+    // Heuristic: If wider than tall (landscape/square), add to right of the rightmost post.
+    // If it gets too wide (aspect ratio > 2:1), add below the bottommost post to wrap.
+    if (boxWidth <= boxHeight * 2) {
+         // Add to Right
+         return { x: rightmostPost.x + 300 + 40, y: rightmostPost.y };
+    } else {
+         // Add Below
+         return { x: bottommostPost.x, y: bottommostPost.y + 300 }; // 300px approx height + gap
+    }
   };
 
   const handlePostDragStart = (id: string) => {
@@ -418,13 +445,10 @@ const WallView: React.FC<WallViewProps> = ({
        await Promise.all(promises);
 
     } else if ((wall?.type as string) === 'kanban') {
-       // Look up the latest state from optimisticPosts ref to get the correct parentId
-       // The 'wall' variable in this closure might be stale (from drag start), so we can't rely on it for the new parentId
        const optimisticState = optimisticPosts.current.get(id);
        const originalPost = wall.posts.find(p => p.id === id);
        
        if (originalPost?.parentId) {
-           // It's a card
            const finalParentId = optimisticState?.parentId || originalPost.parentId;
            const finalY = optimisticState?.y !== undefined ? optimisticState.y : y;
 
@@ -433,7 +457,6 @@ const WallView: React.FC<WallViewProps> = ({
            }
            await onMovePost(id, 0, finalY); 
        } else {
-           // Column Drop
            const movedPost = originalPost;
            if (!movedPost) return;
 
@@ -493,7 +516,7 @@ const WallView: React.FC<WallViewProps> = ({
   };
 
   const handleEditClick = (postId: string) => { if (wall?.isFrozen) return; setEditingPostId(postId); setShowEditor(true); };
-  const handleOpenSettings = () => { if (wall) setSettingsForm({ ...wall }); setShowSettings(true); setShowEmojiPicker(false); setEmojiSearch(''); };
+  const handleOpenSettings = () => { if (wall) setSettingsForm({ ...wall }); setShowSettings(true); setShowEmojiPicker(false); setBgSearch(''); };
   const handleSaveSettings = () => { lastInteractionTime.current = Date.now() + 10000; onUpdateWall(settingsForm); if (wall) setWall({ ...wall, ...settingsForm }); setShowSettings(false); };
   
   const handleAddDetail = (parentId: string) => {
@@ -571,9 +594,6 @@ const WallView: React.FC<WallViewProps> = ({
   if (!wall) return null;
 
   const isTeacher = (userRole === 'teacher' && wall.teacherId === currentUserId);
-  const wallDeepLink = window.location.origin + window.location.pathname + "?wall=" + wall.joinCode;
-  const filteredEmojis = emojiSearch ? POPULAR_EMOJIS.filter(e => e.includes(emojiSearch)) : POPULAR_EMOJIS;
-
   const backgroundStyle = wall.background.startsWith('http') || wall.background.startsWith('data:') 
     ? { backgroundImage: `url(${wall.background})`, backgroundSize: 'cover', backgroundPosition: 'center', backgroundAttachment: 'fixed' }
     : { background: wall.background.includes('from-') ? undefined : wall.background };
@@ -758,6 +778,27 @@ const WallView: React.FC<WallViewProps> = ({
 
       {showCopyToast && <div className="fixed top-24 left-1/2 -translate-x-1/2 z-[300] bg-slate-900/90 text-white px-6 py-3 rounded-full shadow-2xl flex items-center gap-3 backdrop-blur-md border border-white/10 animate-in slide-in-from-top-4"><Check size={18} className="text-green-400" /> Link copied!</div>}
 
+      {showShareOverlay && (
+        <div className="fixed inset-0 z-[300] bg-slate-900/60 backdrop-blur-md flex items-center justify-center p-4" onClick={() => setShowShareOverlay(false)}>
+            <div className="bg-white rounded-[2.5rem] shadow-2xl p-8 max-w-sm w-full text-center space-y-6 relative animate-in zoom-in-95" onClick={e => e.stopPropagation()}>
+                <button onClick={() => setShowShareOverlay(false)} className="absolute top-6 right-6 p-2 text-slate-400 hover:text-slate-600"><X size={24} /></button>
+                <h3 className="text-2xl font-black text-slate-800">Join this Wall</h3>
+                <div className="bg-white p-4 rounded-3xl border-2 border-cyan-100 inline-block shadow-sm">
+                    <img src={`https://api.qrserver.com/v1/create-qr-code/?size=250x250&data=${encodeURIComponent(window.location.origin + window.location.pathname + "?wall=" + wall.joinCode)}&color=0891b2&bgcolor=ffffff`} alt="QR" className="w-48 h-48 rounded-xl object-contain"/>
+                </div>
+                <p className="text-4xl font-black text-cyan-600 tracking-tighter">{wall.joinCode}</p>
+                <button onClick={handleCopyLink} className="w-full py-4 bg-white border border-slate-100 rounded-2xl flex items-center justify-center gap-2 font-bold text-slate-700 hover:bg-slate-50 transition-colors shadow-sm">
+                    <Copy size={18} /> Copy Link
+                </button>
+                {isTeacher && (
+                    <button onClick={handleClassroomShareOpen} className="w-full py-4 bg-slate-900 text-white rounded-2xl flex items-center justify-center gap-2 font-bold hover:bg-slate-800 transition-colors shadow-lg">
+                        <School size={18} /> Share to Classroom
+                    </button>
+                )}
+            </div>
+        </div>
+      )}
+
       {showSettings && isTeacher && (
         <div className="fixed inset-0 z-[200] flex items-center justify-center p-4 bg-slate-900/60 backdrop-blur-sm animate-in fade-in duration-300 modal-overlay">
           <div className="bg-white w-full max-w-2xl max-h-[90vh] rounded-[2rem] shadow-2xl flex flex-col overflow-hidden" onClick={e => e.stopPropagation()}>
@@ -774,11 +815,14 @@ const WallView: React.FC<WallViewProps> = ({
                         <div className="relative">
                             <button onClick={() => setShowEmojiPicker(!showEmojiPicker)} className="h-16 w-16 bg-slate-100 rounded-2xl flex items-center justify-center text-4xl border border-slate-200 hover:bg-slate-200 transition-colors">{settingsForm.icon || '📝'}</button>
                             {showEmojiPicker && (
-                                <div className="absolute top-full mt-2 left-0 z-50 bg-white rounded-2xl shadow-xl border border-slate-100 p-4 w-72 h-80 flex flex-col">
-                                    <input type="text" placeholder="Search..." value={emojiSearch} onChange={(e) => setEmojiSearch(e.target.value)} className="w-full px-4 py-2 bg-slate-50 rounded-lg text-sm mb-2 outline-none text-slate-800" />
-                                    <div className="flex-1 overflow-y-auto custom-scrollbar grid grid-cols-5 gap-2 content-start">
-                                        {filteredEmojis.map((emoji, idx) => <button key={idx} onClick={() => { setSettingsForm({...settingsForm, icon: emoji}); setShowEmojiPicker(false); }} className="h-10 w-10 flex items-center justify-center rounded-lg hover:bg-slate-100 text-xl">{emoji}</button>)}
-                                    </div>
+                                <div className="absolute top-full mt-2 left-0 z-50">
+                                    <EmojiPicker 
+                                      onEmojiClick={(emojiData) => { setSettingsForm({...settingsForm, icon: emojiData.emoji}); setShowEmojiPicker(false); }} 
+                                      width={300} 
+                                      height={400} 
+                                      searchDisabled={false}
+                                      skinTonesDisabled
+                                    />
                                 </div>
                             )}
                         </div>

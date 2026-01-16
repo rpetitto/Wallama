@@ -305,14 +305,14 @@ const PostEditor: React.FC<PostEditorProps> = ({ onClose, onSubmit, authorName, 
         )}
         {imagePickerTab === 'url' && (
           <div className="flex gap-2">
-            <input type="text" placeholder="https://image-url.com/img.jpg" className="flex-1 px-3 py-2 bg-white border border-black/10 rounded-lg text-xs" value={imageUrlInput} onChange={e => setImageUrlInput(e.target.value)} />
+            <input type="text" placeholder="https://image-url.com/img.jpg" className="flex-1 px-3 py-2 bg-white border border-black/10 rounded-lg text-xs text-slate-900" value={imageUrlInput} onChange={e => setImageUrlInput(e.target.value)} />
             <button onClick={() => { if(type==='title') setHeaderImage(imageUrlInput); else setUrl(imageUrlInput); setImageUrlInput(''); }} className="px-3 py-2 bg-slate-800 text-white rounded-lg text-xs font-bold">Apply</button>
           </div>
         )}
         {imagePickerTab === 'search' && (
           <div className="space-y-2">
             <div className="flex gap-2">
-              <input type="text" placeholder="Search images..." className="flex-1 px-3 py-2 bg-white border border-black/10 rounded-lg text-xs" value={imageSearch} onChange={e => setImageSearch(e.target.value)} onKeyDown={e => e.key === 'Enter' && performImageSearch()} />
+              <input type="text" placeholder="Search images..." className="flex-1 px-3 py-2 bg-white border border-black/10 rounded-lg text-xs text-slate-900" value={imageSearch} onChange={e => setImageSearch(e.target.value)} onKeyDown={e => e.key === 'Enter' && performImageSearch()} />
               <button onClick={performImageSearch} disabled={isImageSearching} className="px-4 py-2 bg-indigo-600 text-white rounded-lg text-xs font-bold">
                 {isImageSearching ? <Loader2 className="animate-spin" size={14} /> : 'Go'}
               </button>
@@ -411,7 +411,7 @@ const PostEditor: React.FC<PostEditorProps> = ({ onClose, onSubmit, authorName, 
             {type === 'gif' && (
               <div className="space-y-4">
                 <div className="flex gap-2">
-                  <input type="text" value={gifSearch} onChange={(e) => setGifSearch(e.target.value)} onKeyDown={(e) => e.key === 'Enter' && searchGifs(gifSearch)} placeholder="Search Giphy..." className="flex-1 p-4 bg-white/50 border border-black/5 rounded-xl outline-none" />
+                  <input type="text" value={gifSearch} onChange={(e) => setGifSearch(e.target.value)} onKeyDown={(e) => e.key === 'Enter' && searchGifs(gifSearch)} placeholder="Search Giphy..." className="flex-1 p-4 bg-white/50 border border-black/5 rounded-xl outline-none text-slate-900" />
                   <button onClick={() => searchGifs(gifSearch)} className="px-6 bg-cyan-600 text-white rounded-xl font-bold">Find</button>
                 </div>
                 <div className="grid grid-cols-3 gap-2 max-h-48 overflow-y-auto p-1 custom-scrollbar">
@@ -437,7 +437,7 @@ const PostEditor: React.FC<PostEditorProps> = ({ onClose, onSubmit, authorName, 
             {(type !== 'title' && !isKanbanColumn) && (
               <div className="pt-2">
                 <label className="block text-xs font-black text-slate-400 uppercase tracking-widest mb-2">Caption (Optional)</label>
-                <input type="text" value={caption} onChange={(e) => setCaption(e.target.value)} placeholder="Add some context..." className="w-full px-4 py-3 bg-white/50 border border-black/5 rounded-xl outline-none text-sm" />
+                <input type="text" value={caption} onChange={(e) => setCaption(e.target.value)} placeholder="Add some context..." className="w-full px-4 py-3 bg-white/50 border border-black/5 rounded-xl outline-none text-sm text-slate-900" />
               </div>
             )}
 
