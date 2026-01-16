@@ -49,7 +49,7 @@ const Post: React.FC<PostProps> = ({
   const [relativeTime, setRelativeTime] = useState(getRelativeTime(post.createdAt));
   const [fixedWidth, setFixedWidth] = useState<number | undefined>(undefined);
   
-  const dragStartPos = useRef({ x: 0, y: 0 }); // Mouse start
+  const dragStartPos = useRef({ x: 0, y: 0 }); // Mouse/Touch start
   const postStartPos = useRef({ x: post.x, y: post.y }); // Logic start
   const visualStartPos = useRef({ x: 0, y: 0 }); // Screen start for fixed positioning
   const currentPos = useRef({ x: post.x, y: post.y });
@@ -70,11 +70,7 @@ const Post: React.FC<PostProps> = ({
     return () => clearInterval(timer);
   }, [post.createdAt]);
 
-  const handleMouseDown = (e: React.MouseEvent) => {
-    e.stopPropagation();
-    if (!canDrag) return;
-    if ((e.target as HTMLElement).closest('button, video, a, input, [role="button"]')) return;
-
+  const initDrag = (clientX: number, clientY: number) => {
     if (onDragStart) onDragStart(post.id);
 
     let startX = post.x;
@@ -95,58 +91,96 @@ const Post: React.FC<PostProps> = ({
 
     setIsDragging(true);
     setDragDelta({ x: 0, y: 0 });
-    dragStartPos.current = { x: e.clientX, y: e.clientY };
+    dragStartPos.current = { x: clientX, y: clientY };
     postStartPos.current = { x: startX, y: startY };
     currentPos.current = { x: startX, y: startY };
+  };
+
+  const updateDrag = (clientX: number, clientY: number) => {
+    const dx = (clientX - dragStartPos.current.x) / zoom;
+    const dy = (clientY - dragStartPos.current.y) / zoom;
+    
+    // 1. Visual Delta (Screen pixels if fixed, scaled pixels if absolute)
+    if (isKanbanCard && isDragging) {
+            setDragDelta({ x: clientX - dragStartPos.current.x, y: clientY - dragStartPos.current.y });
+    } else {
+            setDragDelta({ x: dx, y: dy });
+    }
+
+    // 2. Logical Position
+    let nextX = postStartPos.current.x + dx;
+    let nextY = isTimelineMilestone ? postStartPos.current.y : postStartPos.current.y + dy;
+    
+    if (snapToGrid) {
+        nextX = Math.round(nextX / 20) * 20;
+        if (!isTimelineMilestone && !isKanbanColumn && !isKanbanCard) nextY = Math.round(nextY / 20) * 20;
+    }
+
+    currentPos.current = { x: nextX, y: nextY };
+
+    // 3. Throttle updates
+    const now = Date.now();
+    if (now - lastOnMoveCall.current > 50) {
+        onMove(post.id, nextX, nextY, clientX, clientY);
+        lastOnMoveCall.current = now;
+    }
+  };
+
+  const endDrag = () => {
+    setIsDragging(false);
+    setDragDelta({ x: 0, y: 0 });
+    setFixedWidth(undefined);
+    if (onMoveEnd) {
+      onMoveEnd(post.id, currentPos.current.x, currentPos.current.y);
+    }
+  };
+
+  // --- MOUSE EVENTS ---
+  const handleMouseDown = (e: React.MouseEvent) => {
+    e.stopPropagation();
+    if (!canDrag) return;
+    if ((e.target as HTMLElement).closest('button, video, a, input, [role="button"]')) return;
+
+    initDrag(e.clientX, e.clientY);
     
     document.addEventListener('mousemove', handleMouseMove);
     document.addEventListener('mouseup', handleMouseUp);
   };
 
   const handleMouseMove = (e: MouseEvent) => {
-    requestAnimationFrame(() => {
-        const dx = (e.clientX - dragStartPos.current.x) / zoom;
-        const dy = (e.clientY - dragStartPos.current.y) / zoom;
-        
-        // 1. Visual Delta (Screen pixels if fixed, scaled pixels if absolute)
-        // If fixed, we want screen pixels. If absolute, we want scaled.
-        // For Kanban Cards we use Fixed.
-        if (isKanbanCard && isDragging) {
-             setDragDelta({ x: e.clientX - dragStartPos.current.x, y: e.clientY - dragStartPos.current.y });
-        } else {
-             setDragDelta({ x: dx, y: dy });
-        }
-
-        // 2. Logical Position
-        let nextX = postStartPos.current.x + dx;
-        let nextY = isTimelineMilestone ? postStartPos.current.y : postStartPos.current.y + dy;
-        
-        if (snapToGrid) {
-          nextX = Math.round(nextX / 20) * 20;
-          if (!isTimelineMilestone && !isKanbanColumn && !isKanbanCard) nextY = Math.round(nextY / 20) * 20;
-        }
-
-        currentPos.current = { x: nextX, y: nextY };
-
-        // 3. Throttle updates
-        const now = Date.now();
-        if (now - lastOnMoveCall.current > 50) {
-            onMove(post.id, nextX, nextY, e.clientX, e.clientY);
-            lastOnMoveCall.current = now;
-        }
-    });
+    requestAnimationFrame(() => updateDrag(e.clientX, e.clientY));
   };
 
   const handleMouseUp = () => {
-    setIsDragging(false);
-    setDragDelta({ x: 0, y: 0 });
-    setFixedWidth(undefined);
+    endDrag();
     document.removeEventListener('mousemove', handleMouseMove);
     document.removeEventListener('mouseup', handleMouseUp);
-    
-    if (onMoveEnd) {
-      onMoveEnd(post.id, currentPos.current.x, currentPos.current.y);
-    }
+  };
+
+  // --- TOUCH EVENTS (iOS Support) ---
+  const handleTouchStart = (e: React.TouchEvent) => {
+    e.stopPropagation();
+    if (!canDrag) return;
+    if ((e.target as HTMLElement).closest('button, video, a, input, [role="button"]')) return;
+
+    const touch = e.touches[0];
+    initDrag(touch.clientX, touch.clientY);
+
+    // Passive false is crucial for preventing scrolling while dragging
+    document.addEventListener('touchmove', handleTouchMove, { passive: false });
+    document.addEventListener('touchend', handleTouchEnd);
+  };
+
+  const handleTouchMove = (e: TouchEvent) => {
+    if (e.cancelable) e.preventDefault(); // Stop iOS scroll
+    const touch = e.touches[0];
+    requestAnimationFrame(() => updateDrag(touch.clientX, touch.clientY));
+  };
+
+  const handleTouchEnd = () => {
+    endDrag();
+    document.removeEventListener('touchmove', handleTouchMove);
+    document.removeEventListener('touchend', handleTouchEnd);
   };
 
   const renderContent = () => {
@@ -279,7 +313,13 @@ const Post: React.FC<PostProps> = ({
   const containerClass = `post-container ${paddingClass} rounded-2xl border border-black/5 ${!isHexColor ? post.color : ''} group select-none ${shadowClass} ${cursorClass}`;
 
   const PostContent = (
-    <div ref={containerRef} className={containerClass} style={containerStyle} onMouseDown={handleMouseDown}>
+    <div 
+        ref={containerRef} 
+        className={containerClass} 
+        style={containerStyle} 
+        onMouseDown={handleMouseDown} 
+        onTouchStart={handleTouchStart}
+    >
       {!isKanbanColumn && (
           <div className="flex items-center justify-between mb-3">
             <div className="flex items-center gap-2">
@@ -373,6 +413,7 @@ const Post: React.FC<PostProps> = ({
                {!isWallFrozen && onAddDetail && (
                  <button 
                     onClick={(e) => { e.stopPropagation(); onAddDetail(post.id); }}
+                    onTouchStart={(e) => { e.stopPropagation(); onAddDetail(post.id); }}
                     className="mt-1 h-8 w-8 bg-indigo-50 text-indigo-600 rounded-full border border-indigo-200 shadow-sm flex items-center justify-center hover:bg-indigo-600 hover:text-white transition-all pointer-events-auto z-30"
                     title="Add Detail to Milestone"
                  >
@@ -400,6 +441,7 @@ const Post: React.FC<PostProps> = ({
                 {!isWallFrozen && onAddDetail && (
                     <button 
                         onClick={(e) => { e.stopPropagation(); onAddDetail(post.id); }}
+                        onTouchStart={(e) => { e.stopPropagation(); onAddDetail(post.id); }}
                         className="w-full py-3 border-2 border-dashed border-slate-300 rounded-2xl text-slate-400 font-bold hover:bg-white/50 hover:border-cyan-400 hover:text-cyan-600 transition-colors flex items-center justify-center gap-2"
                     >
                         <Plus size={16} /> Add Card

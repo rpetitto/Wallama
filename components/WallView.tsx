@@ -224,6 +224,34 @@ const WallView: React.FC<WallViewProps> = ({
 
   const handleCanvasMouseUp = () => { isPanning.current = false; };
 
+  // --- TOUCH HANDLERS FOR CANVAS PANNING ---
+  const handleCanvasTouchStart = (e: React.TouchEvent) => {
+    if (isInteractionBlocked || !isCanvasMode) return;
+    if ((e.target as HTMLElement).closest('.post-container, .modal-overlay, header, .fixed')) return;
+    
+    // Prevent default to avoid iOS rubber banding
+    // e.preventDefault(); // Don't prevent default on start, it might block scrolling in non-canvas parts if mixed
+
+    const touch = e.touches[0];
+    isPanning.current = true;
+    lastMousePos.current = { x: touch.clientX, y: touch.clientY };
+  };
+
+  const handleCanvasTouchMove = (e: React.TouchEvent) => {
+    if (isInteractionBlocked || !isCanvasMode || !isPanning.current) return;
+    
+    // Crucial for iOS canvas panning
+    if (e.cancelable) e.preventDefault();
+
+    const touch = e.touches[0];
+    const dx = touch.clientX - lastMousePos.current.x;
+    const dy = touch.clientY - lastMousePos.current.y;
+    setPan(prev => ({ x: prev.x + dx, y: prev.y + dy }));
+    lastMousePos.current = { x: touch.clientX, y: touch.clientY };
+  };
+
+  const handleCanvasTouchEnd = () => { isPanning.current = false; };
+
   const performZoomAtPoint = (newZoom: number, screenX: number, screenY: number) => {
     if (!isCanvasMode) return;
     const el = containerRef.current;
@@ -566,12 +594,15 @@ const WallView: React.FC<WallViewProps> = ({
   return (
     <div 
       ref={containerRef}
-      className={`relative min-h-screen w-full overflow-hidden flex flex-col transition-all duration-700 ${wall.background.includes('from-') ? 'bg-gradient-to-br ' + wall.background : ''} ${wall.isFrozen ? 'grayscale-[0.1] contrast-[0.9]' : ''}`}
+      className={`relative h-[100dvh] w-full overflow-hidden flex flex-col transition-all duration-700 ${wall.background.includes('from-') ? 'bg-gradient-to-br ' + wall.background : ''} ${wall.isFrozen ? 'grayscale-[0.1] contrast-[0.9]' : ''}`}
       style={backgroundStyle}
       onMouseDown={handleCanvasMouseDown}
       onMouseMove={handleCanvasMouseMove}
       onMouseUp={handleCanvasMouseUp}
       onMouseLeave={handleCanvasMouseUp}
+      onTouchStart={handleCanvasTouchStart}
+      onTouchMove={handleCanvasTouchMove}
+      onTouchEnd={handleCanvasTouchEnd}
     >
       <header className="sticky top-0 z-[100] bg-white/80 backdrop-blur-xl border-b border-slate-200/50 px-6 py-4 flex items-center justify-between">
         <div className="flex items-center gap-4">
