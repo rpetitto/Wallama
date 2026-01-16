@@ -328,11 +328,11 @@ const Post: React.FC<PostProps> = ({
   const isAbsolute = (isTimelineMilestone || isKanbanColumn) || (!isWrapperControlled && (post.x !== 0 || post.y !== 0)) || (isKanbanCard && isDragging);
 
   const containerStyle: React.CSSProperties = {
-    left: isFixedDrag ? visualStartPos.current.x : (isDragging ? postStartPos.current.x : ((isAbsolute && !isWrapperControlled) ? post.x : undefined)),
-    top: isFixedDrag ? visualStartPos.current.y : (isDragging ? postStartPos.current.y : ((isAbsolute && !isWrapperControlled) ? post.y : undefined)),
+    left: isFixedDrag ? visualStartPos.current.x : ((isDragging && !isKanbanColumn) ? postStartPos.current.x : ((isAbsolute && !isWrapperControlled) ? post.x : undefined)),
+    top: isFixedDrag ? visualStartPos.current.y : ((isDragging && !isKanbanColumn) ? postStartPos.current.y : ((isAbsolute && !isWrapperControlled) ? post.y : undefined)),
     
     transform: (isDragging && !isKanbanColumn) ? `translate(${dragDelta.x}px, ${dragDelta.y}px) rotate(2deg) scale(1.05)` : undefined,
-    zIndex: isDragging ? 99999 : post.zIndex,
+    zIndex: (isDragging && !isKanbanColumn) ? 99999 : post.zIndex,
     
     backgroundColor: isHexColor ? post.color : undefined,
     position: isFixedDrag ? 'fixed' : ((isAbsolute && (!isWrapperControlled || (isKanbanCard && isDragging))) ? 'absolute' : 'relative'),
@@ -490,7 +490,7 @@ const Post: React.FC<PostProps> = ({
                 {!isWallFrozen && onAddDetail && (
                     <button 
                         onClick={(e) => { e.stopPropagation(); onAddDetail(post.id); }}
-                        className="absolute -bottom-4 left-1/2 -translate-x-1/2 h-8 w-8 bg-white text-indigo-600 rounded-full border border-indigo-100 shadow-md flex items-center justify-center hover:bg-indigo-600 hover:text-white transition-all z-20"
+                        className="absolute -bottom-4 left-1/2 -translate-x-1/2 h-8 w-8 bg-white text-indigo-600 rounded-full border border-indigo-100 shadow-md flex items-center justify-center hover:bg-indigo-600 hover:text-white transition-all z-50"
                         title="Add Card"
                     >
                         <Plus size={16} />
