@@ -314,35 +314,45 @@ const WallView: React.FC<WallViewProps> = ({
        return { x: KANBAN_START_X + (slotCount * KANBAN_COLUMN_WIDTH), y: 50 };
     }
     
-    // Freeform logic (Staircase/Cluster packing)
+    // Freeform logic: Grid Packing relative to top-left of content
     if (rootPosts.length === 0) return { x: 100, y: 100 };
 
-    let minX = Infinity, maxX = -Infinity, minY = Infinity, maxY = -Infinity;
-    let rightmostPost = rootPosts[0];
-    let bottommostPost = rootPosts[0];
+    const minX = Math.min(...rootPosts.map(p => p.x));
+    const minY = Math.min(...rootPosts.map(p => p.y));
+    
+    // Normalize start to be somewhat aligned
+    const startX = Math.floor(minX / 10) * 10;
+    const startY = Math.floor(minY / 10) * 10;
 
-    rootPosts.forEach(p => {
-        if (p.x < minX) minX = p.x;
-        if (p.x > maxX) maxX = p.x;
-        if (p.y < minY) minY = p.y;
-        if (p.y > maxY) maxY = p.y;
+    const CARD_W = 300;
+    const GAP = 40;
+    const COL_WIDTH = CARD_W + GAP;
+    const ROW_HEIGHT = 320; 
+    const MAX_COLS = 6; 
 
-        // Tie-break: prefer bottom-right
-        if (p.x > rightmostPost.x || (p.x === rightmostPost.x && p.y > rightmostPost.y)) rightmostPost = p;
-        if (p.y > bottommostPost.y || (p.y === bottommostPost.y && p.x > bottommostPost.x)) bottommostPost = p;
-    });
+    let col = 0;
+    let row = 0;
 
-    const boxWidth = (maxX + 300) - minX;
-    const boxHeight = (maxY + 200) - minY; 
+    while (true) {
+        const x = startX + (col * COL_WIDTH);
+        const y = startY + (row * ROW_HEIGHT);
+        
+        const collision = rootPosts.some(p => {
+             // Check overlap with existing post p
+             return (x < p.x + 280 && x + 280 > p.x && y < p.y + 200 && y + 200 > p.y);
+        });
 
-    // Heuristic: If wider than tall (landscape/square), add to right of the rightmost post.
-    // If it gets too wide (aspect ratio > 2:1), add below the bottommost post to wrap.
-    if (boxWidth <= boxHeight * 2) {
-         // Add to Right
-         return { x: rightmostPost.x + 300 + 40, y: rightmostPost.y };
-    } else {
-         // Add Below
-         return { x: bottommostPost.x, y: bottommostPost.y + 300 }; // 300px approx height + gap
+        if (!collision) {
+            return { x, y };
+        }
+
+        col++;
+        if (col >= MAX_COLS) {
+            col = 0;
+            row++;
+        }
+        
+        if (row > 500) return { x: startX + 100, y: startY + 100 };
     }
   };
 

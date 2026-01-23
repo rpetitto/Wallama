@@ -2,9 +2,8 @@
 import React, { useState, useRef, useEffect } from 'react';
 import { PostType, Post } from '../types';
 import { X, Image as ImageIcon, Link as LinkIcon, Gift, Video, Sparkles, Send, Camera, StopCircle, Upload, Loader2, Type, Search, Check, Palette, MessageSquare, ShieldAlert, Save, HardDrive, Bold, Italic, Underline, Code, List, ListOrdered, Quote, LayoutGrid, Link as LinkIconSmall } from 'lucide-react';
-import { refinePostContent, checkContentSafety } from '../services/geminiService';
+import { checkContentSafety } from '../services/geminiService';
 import { WALL_COLORS, WALL_GRADIENTS } from '../constants';
-import { GoogleGenAI } from "@google/genai";
 
 declare const google: any;
 
@@ -18,6 +17,7 @@ interface PostEditorProps {
 }
 
 const GIPHY_API_KEY = 'eo5zSu2rUveZJB4kxO3S1Rv57KkMbhiQ'; 
+const PEXELS_API_KEY = 'cogJbSeg4haPpdbPHoJfgFvHj03qp0uhvbqSADJRf52ItNL6s4pzCY9B';
 const GOOGLE_CLIENT_ID = "6888240288-5v0p6nsoi64q1puv1vpvk1njd398ra8b.apps.googleusercontent.com";
 
 const PostEditor: React.FC<PostEditorProps> = ({ onClose, onSubmit, authorName, initialPost, parentId, isKanbanColumn }) => {
@@ -31,17 +31,16 @@ const PostEditor: React.FC<PostEditorProps> = ({ onClose, onSubmit, authorName, 
   const [isRecording, setIsRecording] = useState(false);
   const [videoBase64, setVideoBase64] = useState<string | null>(null);
   const [videoThumbnail, setVideoThumbnail] = useState<string | null>(null);
-  const [isRefining, setIsRefining] = useState(false);
   const [isFetchingLink, setIsFetchingLink] = useState(false);
   const [linkMetadata, setLinkMetadata] = useState<any>(null);
   const [isCheckingSafety, setIsCheckingSafety] = useState(false);
   const [safetyError, setSafetyError] = useState<string | null>(null);
   
-  // Defaulting to 'upload' and removed 'presets' from types for posts
   const [imagePickerTab, setImagePickerTab] = useState<'upload' | 'drive' | 'url' | 'search'>('upload');
   const [imageSearch, setImageSearch] = useState('');
   const [imageUrlInput, setImageUrlInput] = useState('');
   const [isImageSearching, setIsImageSearching] = useState(false);
+  const [pexelsImages, setPexelsImages] = useState<any[]>([]);
   const [driveFiles, setDriveFiles] = useState<any[]>([]);
   const [driveToken, setDriveToken] = useState<string | null>(sessionStorage.getItem('google_drive_token'));
 
@@ -111,19 +110,30 @@ const PostEditor: React.FC<PostEditorProps> = ({ onClose, onSubmit, authorName, 
   const performImageSearch = async () => {
     if (!imageSearch) return;
     setIsImageSearching(true);
+    setPexelsImages([]);
     try {
-        const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
-        const response = await ai.models.generateContent({
-            model: 'gemini-3-flash-preview',
-            contents: `Find a direct image URL for: "${imageSearch}". Return ONLY the raw URL string.`,
-            config: { tools: [{ googleSearch: {} }] }
+        const res = await fetch(`https://api.pexels.com/v1/search?query=${encodeURIComponent(imageSearch)}&per_page=12&orientation=landscape`, {
+            headers: { Authorization: PEXELS_API_KEY }
         });
-        const foundUrl = response.text.trim().replace(/`/g, '');
-        if (foundUrl.startsWith('http')) {
-            if (type === 'title') setHeaderImage(foundUrl);
-            else setUrl(foundUrl);
-        }
-    } catch (e) { console.error(e); } finally { setIsImageSearching(false); }
+        const data = await res.json();
+        setPexelsImages(data.photos || []);
+    } catch (e) { 
+        console.error(e); 
+    } finally { 
+        setIsImageSearching(false); 
+    }
+  };
+
+  const selectPexelsImage = (photo: any) => {
+      const imgUrl = photo.src.large2x || photo.src.large;
+      const credit = `Photo by ${photo.photographer} on Pexels`;
+      
+      if (type === 'title') {
+          setHeaderImage(imgUrl);
+      } else {
+          setUrl(imgUrl);
+          if (!caption) setCaption(credit);
+      }
   };
 
   const handleImageUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -161,14 +171,6 @@ const PostEditor: React.FC<PostEditorProps> = ({ onClose, onSubmit, authorName, 
       const data = await res.json();
       setGifs(data.data || []);
     } catch (err) { console.error(err); } finally { setIsSearchingGifs(false); }
-  };
-
-  const handleRefine = async () => {
-    if (!content) return;
-    setIsRefining(true);
-    const refined = await refinePostContent(content, 'text');
-    setContent(refined);
-    setIsRefining(false);
   };
 
   const fetchLinkMetadata = async (targetUrl: string) => {
@@ -237,9 +239,7 @@ const PostEditor: React.FC<PostEditorProps> = ({ onClose, onSubmit, authorName, 
     if (type === 'title' && !submissionTitle && !submissionContent && !isKanbanColumn) return;
     if (isKanbanColumn && !submissionTitle && !submissionContent) return;
 
-    // Safety Check: Construct text payload.
-    // Crucially, avoid adding the base64 media content to the text check if it's a video/image/gif.
-    // This prevents hitting token limits or size errors with Gemini.
+    // Safety Check
     const textContentForSafety = (type === 'title' || type === 'text' || type === 'link' || type === 'drive') ? submissionContent : '';
     const safetyPayload = `${submissionTitle} ${textContentForSafety} ${caption}`.trim();
 
@@ -310,13 +310,30 @@ const PostEditor: React.FC<PostEditorProps> = ({ onClose, onSubmit, authorName, 
           </div>
         )}
         {imagePickerTab === 'search' && (
-          <div className="space-y-2">
+          <div className="space-y-3">
             <div className="flex gap-2">
               <input type="text" placeholder="Search images..." className="flex-1 px-3 py-2 bg-white border border-black/10 rounded-lg text-xs text-slate-900" value={imageSearch} onChange={e => setImageSearch(e.target.value)} onKeyDown={e => e.key === 'Enter' && performImageSearch()} />
               <button onClick={performImageSearch} disabled={isImageSearching} className="px-4 py-2 bg-indigo-600 text-white rounded-lg text-xs font-bold">
                 {isImageSearching ? <Loader2 className="animate-spin" size={14} /> : 'Go'}
               </button>
             </div>
+            {pexelsImages.length > 0 && (
+                 <div className="grid grid-cols-3 gap-2 max-h-48 overflow-y-auto p-1 custom-scrollbar">
+                    {pexelsImages.map((photo) => (
+                         <button 
+                            key={photo.id} 
+                            onClick={() => selectPexelsImage(photo)}
+                            className="aspect-video relative rounded-lg overflow-hidden border-2 border-transparent hover:border-cyan-500 transition-all group"
+                         >
+                            <img src={photo.src.tiny} className="w-full h-full object-cover" alt={photo.alt} />
+                            <div className="absolute inset-0 bg-black/0 group-hover:bg-black/10 transition-colors" />
+                         </button>
+                    ))}
+                 </div>
+            )}
+            {pexelsImages.length === 0 && !isImageSearching && imageSearch && (
+                <p className="text-center text-xs text-slate-400 py-2">No results found.</p>
+            )}
           </div>
         )}
         {(type === 'title' ? headerImage : url) && (
@@ -388,7 +405,6 @@ const PostEditor: React.FC<PostEditorProps> = ({ onClose, onSubmit, authorName, 
                     </div>
 
                     <textarea ref={textareaRef} value={content} onChange={(e) => setContent(e.target.value)} placeholder="Enter details or thoughts..." className="w-full h-32 p-4 bg-white/50 border border-black/5 rounded-b-2xl focus:ring-4 focus:ring-cyan-500/20 focus:border-cyan-500 outline-none resize-none text-base font-medium text-slate-900" />
-                    <button onClick={handleRefine} disabled={!content || isRefining} className="absolute bottom-4 right-4 flex items-center gap-2 px-3 py-1.5 bg-cyan-600 text-white rounded-full text-xs font-bold shadow-md transition-all"><Sparkles size={14} /> {isRefining ? '...' : 'AI Refine'}</button>
                     </div>
                 )}
               </div>
