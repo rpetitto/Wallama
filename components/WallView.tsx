@@ -503,6 +503,21 @@ const WallView: React.FC<WallViewProps> = ({
         return;
     }
     const slot = isCanvasMode ? findSmartSlot(wall?.posts || []) : { x: 0, y: 0 };
+    
+    // Auto-center on new post
+    if (isCanvasMode) {
+      const containerW = containerRef.current?.clientWidth || window.innerWidth;
+      const containerH = containerRef.current?.clientHeight || window.innerHeight;
+      
+      const centerX = slot.x + 150; 
+      const centerY = slot.y + 100;
+
+      const newPanX = (containerW / 2) - (centerX * zoom);
+      const newPanY = (containerH / 2) - (centerY * zoom);
+
+      setPan({ x: newPanX, y: newPanY });
+    }
+
     const tempId = 'temp_' + Date.now();
     const optimisticPost: PostType = {
       id: tempId, type: data.type || 'title', title: data.title, content: data.content || '',
