@@ -1,6 +1,6 @@
 
 import React, { useState, useEffect, useCallback, useRef } from 'react';
-import { Wall, Post as PostType, UserRole, ClassroomCourse, WallType } from '../types';
+import { Wall, Post as PostType, UserRole, ClassroomCourse, WallType, User } from '../types';
 import Post from './Post';
 import PostEditor from './PostEditor';
 import { ChevronLeft, Plus, Share2, Settings, X, Check, ZoomIn, ZoomOut, Maximize, Loader2, AlertCircle, LayoutGrid, Lock, Unlock, Image as ImageIcon, Copy, Search, School, Trash2, ShieldAlert, Upload, HardDrive, Link as LinkIcon, Sparkles, Grip, Layers, List, History, Kanban, Info, LogIn } from 'lucide-react';
@@ -26,6 +26,7 @@ interface WallViewProps {
   onMovePost: (id: string, x: number, y: number) => Promise<void>;
   onUpdateWall: (wall: Partial<Wall>) => void;
   onEditPost: (id: string, post: Partial<PostType>) => Promise<PostType | null>; 
+  onLogin: (user: User, accessToken: string) => void;
   currentUserId: string;
   authorName: string;
   userRole: UserRole;
@@ -33,7 +34,7 @@ interface WallViewProps {
 }
 
 const WallView: React.FC<WallViewProps> = ({ 
-  wallId, onBack, onAddPost, onDeletePost, onMovePost, onUpdateWall, onEditPost, currentUserId, authorName, userRole, isGuest 
+  wallId, onBack, onAddPost, onDeletePost, onMovePost, onUpdateWall, onEditPost, onLogin, currentUserId, authorName, userRole, isGuest 
 }) => {
   const [wall, setWall] = useState<Wall | null>(null);
   const [showEditor, setShowEditor] = useState(false);
@@ -64,6 +65,8 @@ const WallView: React.FC<WallViewProps> = ({
   const [driveToken, setDriveToken] = useState<string | null>(sessionStorage.getItem('google_drive_token'));
   const driveTokenClient = useRef<any>(null);
   const classroomTokenClient = useRef<any>(null);
+  const loginTokenClient = useRef<any>(null);
+  const [isLoggingIn, setIsLoggingIn] = useState(false);
 
   const [zoom, setZoom] = useState(1);
   const [pan, setPan] = useState({ x: 0, y: 0 });
@@ -112,8 +115,62 @@ const WallView: React.FC<WallViewProps> = ({
           }
         },
       });
+
+      loginTokenClient.current = google.accounts.oauth2.initTokenClient({
+        client_id: GOOGLE_CLIENT_ID,
+        scope: 'https://www.googleapis.com/auth/classroom.courses.readonly https://www.googleapis.com/auth/classroom.rosters.readonly https://www.googleapis.com/auth/classroom.announcements https://www.googleapis.com/auth/userinfo.profile https://www.googleapis.com/auth/userinfo.email',
+        callback: handleLoginResponse,
+      });
     }
   }, []);
+
+  const handleLoginResponse = async (response: any) => {
+      if (response.error) {
+          setIsLoggingIn(false);
+          return;
+      }
+      setIsLoggingIn(true);
+      try {
+          const accessToken = response.access_token;
+          const profileRes = await fetch('https://www.googleapis.com/oauth2/v3/userinfo', {
+            headers: { Authorization: `Bearer ${accessToken}` },
+          });
+          const profile = await profileRes.json();
+
+          let role: UserRole = 'student';
+          try {
+            const classroomRes = await fetch('https://classroom.googleapis.com/v1/courses?teacherId=me&pageSize=1', {
+                headers: { Authorization: `Bearer ${accessToken}` },
+            });
+            if (classroomRes.ok) {
+                const classroomData = await classroomRes.json();
+                if (classroomData.courses && classroomData.courses.length > 0) {
+                    role = 'teacher';
+                }
+            }
+          } catch (e) {}
+
+          const newUser: User = {
+            id: profile.sub,
+            name: profile.name,
+            email: profile.email,
+            role: role,
+            avatar: profile.picture
+          };
+          
+          onLogin(newUser, accessToken); 
+      } catch (error) {
+          console.error(error);
+      } finally {
+          setIsLoggingIn(false);
+      }
+  };
+
+  const handleSignIn = () => {
+      if (loginTokenClient.current) {
+          loginTokenClient.current.requestAccessToken();
+      }
+  };
 
   useEffect(() => {
     if (driveToken && driveFiles.length === 0 && showSettings && bgPickerTab === 'drive') {
@@ -833,9 +890,22 @@ const WallView: React.FC<WallViewProps> = ({
       )}
 
       {!wall.isFrozen && !canContribute && (
-          <div className="fixed bottom-10 right-10 z-[100] px-6 py-3 bg-slate-800 text-white rounded-full shadow-xl flex items-center gap-2 font-bold text-xs border-2 border-slate-700 backdrop-blur-md">
-              <Lock size={14} className="text-slate-400" />
-              Read-only mode. Sign in to contribute.
+          <div className="fixed bottom-10 left-1/2 -translate-x-1/2 z-[100] px-8 py-4 bg-slate-900/95 text-white rounded-2xl shadow-2xl flex flex-col sm:flex-row items-center gap-4 font-bold border border-white/10 backdrop-blur-xl animate-in slide-in-from-bottom-10 fade-in duration-500 max-w-md w-full sm:w-auto text-center sm:text-left">
+              <div className="flex items-center gap-3">
+                  <div className="p-2 bg-white/10 rounded-full"><Lock size={20} className="text-cyan-400" /></div>
+                  <div>
+                      <p className="text-sm text-white">Read-only mode</p>
+                      <p className="text-xs text-slate-400 font-medium">Sign in to add posts & contribute.</p>
+                  </div>
+              </div>
+              <button 
+                  onClick={handleSignIn}
+                  disabled={isLoggingIn}
+                  className="px-5 py-2.5 bg-cyan-600 hover:bg-cyan-500 text-white rounded-xl text-xs font-bold transition-all shadow-lg active:scale-95 flex items-center gap-2 whitespace-nowrap"
+              >
+                  {isLoggingIn ? <Loader2 size={16} className="animate-spin" /> : <img src="https://www.gstatic.com/classroom/logo_square_48.svg" className="w-4 h-4" alt="" />}
+                  Sign in with Classroom
+              </button>
           </div>
       )}
 

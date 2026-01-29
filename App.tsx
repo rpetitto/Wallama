@@ -233,6 +233,7 @@ const App: React.FC = () => {
         onDeletePost={handleDeletePost}
         onMovePost={handleMovePost}
         onUpdateWall={handleUpdateWall}
+        onLogin={handleLogin}
         currentUserId={user?.id || ''}
         authorName={user?.name || 'Guest'}
         userRole={user?.role || 'student'}
