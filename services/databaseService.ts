@@ -22,7 +22,6 @@ const mapWallFromDB = (dbWall: any): Wall => {
     isFrozen: dbWall.is_frozen ?? false,
     privacyType: dbWall.privacy_type || 'link',
     icon: dbWall.icon || '📝',
-    requireLoginToPost: dbWall.require_login_to_post ?? false,
     posts: (dbWall.posts || []).map(mapPostFromDB)
   };
 };
@@ -151,8 +150,7 @@ export const databaseService = {
           is_anonymous: wall.isAnonymous,
           is_frozen: wall.isFrozen,
           privacy_type: wall.privacyType,
-          icon: wall.icon || '📝',
-          require_login_to_post: wall.requireLoginToPost ?? false
+          icon: wall.icon || '📝'
         }])
         .select().single();
 
@@ -243,7 +241,6 @@ export const databaseService = {
       if (updates.snapToGrid !== undefined) sqlUpdates.snap_to_grid = updates.snapToGrid;
       if (updates.privacyType !== undefined) sqlUpdates.privacy_type = updates.privacyType;
       if (updates.icon !== undefined) sqlUpdates.icon = updates.icon;
-      if (updates.requireLoginToPost !== undefined) sqlUpdates.require_login_to_post = updates.requireLoginToPost;
 
       const { error } = await supabase.from('walls').update(sqlUpdates).eq('id', wallId);
       return !error;

@@ -235,7 +235,6 @@ const App: React.FC = () => {
         currentUserId={user?.id || ''}
         authorName={user?.name || 'Guest'}
         userRole={user?.role || 'student'}
-        isGuest={user?.isGuest || false}
       />
     );
   }

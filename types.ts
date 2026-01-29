@@ -57,7 +57,6 @@ export interface Wall {
   privacyType: PrivacyType;
   whitelist?: string[];
   icon?: string;
-  requireLoginToPost?: boolean;
 }
 
 export interface GiphyResult {
