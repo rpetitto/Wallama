@@ -1,4 +1,9 @@
 
+/*
+  SQL UPDATE REQUIRED:
+  ALTER TABLE walls ADD COLUMN IF NOT EXISTS require_login_to_post BOOLEAN DEFAULT false;
+*/
+
 import { createClient } from '@supabase/supabase-js';
 import { Wall, Post } from '../types';
 
@@ -20,6 +25,7 @@ const mapWallFromDB = (dbWall: any): Wall => {
     snapToGrid: dbWall.snap_to_grid ?? true,
     isAnonymous: dbWall.is_anonymous ?? false,
     isFrozen: dbWall.is_frozen ?? false,
+    requireLoginToPost: dbWall.require_login_to_post ?? false,
     privacyType: dbWall.privacy_type || 'link',
     icon: dbWall.icon || '📝',
     posts: (dbWall.posts || []).map(mapPostFromDB)
@@ -149,6 +155,7 @@ export const databaseService = {
           snap_to_grid: wall.snapToGrid,
           is_anonymous: wall.isAnonymous,
           is_frozen: wall.isFrozen,
+          require_login_to_post: wall.requireLoginToPost,
           privacy_type: wall.privacyType,
           icon: wall.icon || '📝'
         }])
@@ -238,6 +245,7 @@ export const databaseService = {
       if (updates.background !== undefined) sqlUpdates.background = updates.background;
       if (updates.isAnonymous !== undefined) sqlUpdates.is_anonymous = updates.isAnonymous;
       if (updates.isFrozen !== undefined) sqlUpdates.is_frozen = updates.isFrozen;
+      if (updates.requireLoginToPost !== undefined) sqlUpdates.require_login_to_post = updates.requireLoginToPost;
       if (updates.snapToGrid !== undefined) sqlUpdates.snap_to_grid = updates.snapToGrid;
       if (updates.privacyType !== undefined) sqlUpdates.privacy_type = updates.privacyType;
       if (updates.icon !== undefined) sqlUpdates.icon = updates.icon;
