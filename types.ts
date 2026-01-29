@@ -54,7 +54,6 @@ export interface Wall {
   snapToGrid?: boolean;
   isAnonymous?: boolean;
   isFrozen?: boolean;
-  requireLoginToPost?: boolean;
   privacyType: PrivacyType;
   whitelist?: string[];
   icon?: string;
