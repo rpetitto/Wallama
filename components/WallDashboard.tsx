@@ -3,11 +3,13 @@ import React, { useState, useRef, useEffect } from 'react';
 import { User, Wall, WallType } from '../types';
 import { Plus, LogOut, ArrowRight, Layout, Users, Calendar, X, Loader2, BookOpen, Layers, Grip, List, ChevronRight, Check, History, MoreVertical, Share2, Lock, Unlock, Trash2, Copy, ShieldAlert, Kanban } from 'lucide-react';
 import { LlamaLogo } from './LlamaLogo';
+import { GoogleGenAI } from "@google/genai";
+import EmojiPicker from 'emoji-picker-react';
 
 interface WallDashboardProps {
   user: User;
   walls: Wall[];
-  onCreateWall: (name: string, desc: string, type: WallType) => void;
+  onCreateWall: (name: string, desc: string, type: WallType, icon: string) => void;
   onJoinWall: (code: string) => void;
   onSelectWall: (id: string) => void;
   onUpdateWall: (wallId: string, updates: Partial<Wall>) => void;
@@ -24,6 +26,9 @@ const WallDashboard: React.FC<WallDashboardProps> = ({
   const [newWallName, setNewWallName] = useState('');
   const [newWallDesc, setNewWallDesc] = useState('');
   const [newWallType, setNewWallType] = useState<WallType>('freeform');
+  const [newWallIcon, setNewWallIcon] = useState('📝');
+  const [isGeneratingIcon, setIsGeneratingIcon] = useState(false);
+  const [showEmojiPicker, setShowEmojiPicker] = useState(false);
   const [joinCode, setJoinCode] = useState('');
   
   const [openMenuId, setOpenMenuId] = useState<string | null>(null);
@@ -54,16 +59,40 @@ const WallDashboard: React.FC<WallDashboardProps> = ({
     { id: 'kanban', label: 'Kanban', desc: 'Columns for categories with draggable cards.', icon: Kanban }
   ];
 
-  const handleNextStep = () => {
-    if (newWallName) setCreateStep(2);
+  const generateIcon = async () => {
+    if (!newWallName) return;
+    setIsGeneratingIcon(true);
+    try {
+        const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
+        const response = await ai.models.generateContent({
+            model: 'gemini-3-flash-preview',
+            contents: `Suggest a single emoji that represents the topic: "${newWallName}". Return only the emoji character.`,
+        });
+        const emoji = response.text?.trim();
+        if (emoji && [...emoji].length <= 2) { 
+             setNewWallIcon(emoji);
+        }
+    } catch (e) {
+        console.error(e);
+    } finally {
+        setIsGeneratingIcon(false);
+    }
+  };
+
+  const handleNextStep = async () => {
+    if (newWallName) {
+        if (newWallIcon === '📝') await generateIcon();
+        setCreateStep(2);
+    }
   };
 
   const handleCreate = () => {
-    onCreateWall(newWallName, newWallDesc, newWallType);
+    onCreateWall(newWallName, newWallDesc, newWallType, newWallIcon);
     setShowCreateModal(false);
     setCreateStep(1);
     setNewWallName('');
     setNewWallDesc('');
+    setNewWallIcon('📝');
   };
 
   const handleCopyLink = (wall: Wall) => {
@@ -304,7 +333,7 @@ const WallDashboard: React.FC<WallDashboardProps> = ({
 
       {showCreateModal && (
         <div className="fixed inset-0 z-[60] flex items-center justify-center p-4 bg-slate-900/60 backdrop-blur-sm animate-in fade-in duration-300">
-          <div className="bg-white w-full max-w-lg rounded-[2.5rem] p-8 shadow-2xl relative">
+          <div className="bg-white w-full max-w-lg rounded-[2.5rem] p-8 shadow-2xl relative" onClick={e => e.stopPropagation()}>
             <button onClick={() => { setShowCreateModal(false); setCreateStep(1); }} className="absolute top-6 right-6 text-slate-400 hover:text-slate-600 p-2 rounded-full hover:bg-slate-100 transition-colors">
               <X size={20} />
             </button>
@@ -319,18 +348,42 @@ const WallDashboard: React.FC<WallDashboardProps> = ({
               <div className="space-y-6">
                 <h3 className="text-2xl font-black text-slate-800 tracking-tight">Name your Wall</h3>
                 <div className="space-y-4">
-                  <div>
-                    <label className="block text-xs font-bold text-slate-400 uppercase tracking-widest mb-2 ml-1">Title</label>
-                    <input
-                      autoFocus
-                      type="text"
-                      value={newWallName}
-                      onChange={(e) => setNewWallName(e.target.value)}
-                      onKeyDown={(e) => e.key === 'Enter' && handleNextStep()}
-                      placeholder="Class Reflection"
-                      className="w-full px-5 py-4 bg-slate-50 border border-slate-200 rounded-2xl focus:ring-4 focus:ring-cyan-100 outline-none text-slate-900 font-bold placeholder:text-slate-300"
-                    />
-                  </div>
+                    <div className="flex gap-4 items-start">
+                        <div className="relative">
+                            <label className="block text-xs font-bold text-slate-400 uppercase tracking-widest mb-2 ml-1">Icon</label>
+                            <button 
+                                onClick={() => setShowEmojiPicker(!showEmojiPicker)} 
+                                className="h-[60px] w-[60px] bg-slate-50 border border-slate-200 rounded-2xl flex items-center justify-center text-3xl hover:bg-slate-100 transition-colors relative"
+                            >
+                                {isGeneratingIcon ? <Loader2 className="animate-spin text-cyan-600" size={24} /> : newWallIcon}
+                            </button>
+                            {showEmojiPicker && (
+                                <div className="absolute top-full mt-2 left-0 z-50">
+                                    <EmojiPicker 
+                                      onEmojiClick={(emojiData) => { setNewWallIcon(emojiData.emoji); setShowEmojiPicker(false); }} 
+                                      width={300} 
+                                      height={400} 
+                                      searchDisabled={false}
+                                      skinTonesDisabled
+                                    />
+                                </div>
+                            )}
+                        </div>
+                        <div className="flex-1">
+                            <label className="block text-xs font-bold text-slate-400 uppercase tracking-widest mb-2 ml-1">Title</label>
+                            <input
+                            autoFocus
+                            type="text"
+                            value={newWallName}
+                            onChange={(e) => setNewWallName(e.target.value)}
+                            onBlur={() => { if(newWallIcon === '📝') generateIcon(); }}
+                            onKeyDown={(e) => e.key === 'Enter' && handleNextStep()}
+                            placeholder="Class Reflection"
+                            className="w-full px-5 py-4 bg-slate-50 border border-slate-200 rounded-2xl focus:ring-4 focus:ring-cyan-100 outline-none text-slate-900 font-bold placeholder:text-slate-300 h-[60px]"
+                            />
+                        </div>
+                    </div>
+                  
                   <div>
                     <label className="block text-xs font-bold text-slate-400 uppercase tracking-widest mb-2 ml-1">Description</label>
                     <textarea
