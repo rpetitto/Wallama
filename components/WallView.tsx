@@ -61,6 +61,7 @@ const WallView: React.FC<WallViewProps> = ({
   const [driveFiles, setDriveFiles] = useState<any[]>([]);
   const [driveToken, setDriveToken] = useState<string | null>(sessionStorage.getItem('google_drive_token'));
   const driveTokenClient = useRef<any>(null);
+  const classroomTokenClient = useRef<any>(null);
 
   const [zoom, setZoom] = useState(1);
   const [pan, setPan] = useState({ x: 0, y: 0 });
@@ -93,6 +94,17 @@ const WallView: React.FC<WallViewProps> = ({
             sessionStorage.setItem('google_drive_token', response.access_token);
             setDriveToken(response.access_token);
             fetchDriveFiles(response.access_token);
+          }
+        },
+      });
+
+      classroomTokenClient.current = google.accounts.oauth2.initTokenClient({
+        client_id: GOOGLE_CLIENT_ID,
+        scope: 'https://www.googleapis.com/auth/classroom.courses.readonly https://www.googleapis.com/auth/classroom.announcements',
+        callback: (response: any) => {
+          if (response.access_token) {
+            sessionStorage.setItem('google_access_token', response.access_token);
+            openClassroomModal(response.access_token);
           }
         },
       });
@@ -565,7 +577,7 @@ const WallView: React.FC<WallViewProps> = ({
     try {
         const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
         const response = await ai.models.generateContent({
-            model: 'gemini-3-flash-preview',
+            model: 'gemgemini-3-flash-preview',
             contents: `Find a direct URL to a high-quality professional wallpaper for "${bgSearch}". Return ONLY the URL string.`,
             config: { tools: [{ googleSearch: {} }] }
         });
@@ -578,15 +590,23 @@ const WallView: React.FC<WallViewProps> = ({
 
   const handleCopyLink = () => { const link = wall ? (window.location.origin + window.location.pathname + "?wall=" + wall.joinCode) : window.location.href; navigator.clipboard.writeText(link); setShowCopyToast(true); setTimeout(() => setShowCopyToast(false), 2000); };
   const handleShare = () => setShowShareOverlay(true);
-  const handleClassroomShareOpen = async () => {
-    const token = sessionStorage.getItem('google_access_token');
-    if (!token) return;
+  
+  const openClassroomModal = async (token: string) => {
     setIsSyncing(true);
     const fetchedCourses = await classroomService.listCourses(token);
     setCourses(fetchedCourses);
     setShowClassroomModal(true);
     setShowShareOverlay(false);
     setIsSyncing(false);
+  }
+
+  const handleClassroomShareOpen = async () => {
+    const token = sessionStorage.getItem('google_access_token');
+    if (!token) {
+        classroomTokenClient.current?.requestAccessToken();
+        return;
+    }
+    await openClassroomModal(token);
   };
 
   const toggleCourseSelection = (id: string) => {

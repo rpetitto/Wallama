@@ -41,7 +41,7 @@ export const classroomService = {
 
   async shareWallToCourse(accessToken: string, courseId: string, wall: Wall): Promise<boolean> {
     try {
-      const linkUrl = window.location.origin + window.location.pathname + "?wall=" + wall.id;
+      const linkUrl = window.location.origin + window.location.pathname + "?wall=" + wall.joinCode;
       const message = `Join our class wall: ${wall.name}`;
       
       const response = await fetch(`https://classroom.googleapis.com/v1/courses/${courseId}/announcements`, {
