@@ -9,7 +9,7 @@ import EmojiPicker from 'emoji-picker-react';
 interface WallDashboardProps {
   user: User;
   walls: Wall[];
-  onCreateWall: (name: string, desc: string, type: WallType, icon: string) => void;
+  onCreateWall: (name: string, desc: string, type: WallType, icon: string, requireLoginToPost: boolean) => void;
   onJoinWall: (code: string) => void;
   onSelectWall: (id: string) => void;
   onUpdateWall: (wallId: string, updates: Partial<Wall>) => void;
@@ -27,6 +27,7 @@ const WallDashboard: React.FC<WallDashboardProps> = ({
   const [newWallDesc, setNewWallDesc] = useState('');
   const [newWallType, setNewWallType] = useState<WallType>('freeform');
   const [newWallIcon, setNewWallIcon] = useState('📝');
+  const [newWallRequireLogin, setNewWallRequireLogin] = useState(false);
   const [isGeneratingIcon, setIsGeneratingIcon] = useState(false);
   const [showEmojiPicker, setShowEmojiPicker] = useState(false);
   const [joinCode, setJoinCode] = useState('');
@@ -87,12 +88,13 @@ const WallDashboard: React.FC<WallDashboardProps> = ({
   };
 
   const handleCreate = () => {
-    onCreateWall(newWallName, newWallDesc, newWallType, newWallIcon);
+    onCreateWall(newWallName, newWallDesc, newWallType, newWallIcon, newWallRequireLogin);
     setShowCreateModal(false);
     setCreateStep(1);
     setNewWallName('');
     setNewWallDesc('');
     setNewWallIcon('📝');
+    setNewWallRequireLogin(false);
   };
 
   const handleCopyLink = (wall: Wall) => {
@@ -429,6 +431,12 @@ const WallDashboard: React.FC<WallDashboardProps> = ({
                     </button>
                   ))}
                 </div>
+
+                <div className="flex items-center justify-between p-4 bg-slate-50 rounded-2xl border border-slate-100">
+                    <div className="flex flex-col"><span className="font-bold text-slate-800">Require Login</span><span className="text-xs text-slate-500">Guests must sign in to post</span></div>
+                    <button onClick={() => setNewWallRequireLogin(!newWallRequireLogin)} className={`w-12 h-6 rounded-full relative transition-colors ${newWallRequireLogin ? 'bg-cyan-600' : 'bg-slate-300'}`}><div className={`absolute top-1 w-4 h-4 bg-white rounded-full transition-all ${newWallRequireLogin ? 'left-7' : 'left-1'}`} /></button>
+                </div>
+
                 <div className="flex gap-4">
                    <button onClick={() => setCreateStep(1)} className="px-6 py-4 font-bold text-slate-400">Back</button>
                    <button 

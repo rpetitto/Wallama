@@ -3,7 +3,7 @@ import React, { useState, useEffect, useCallback, useRef } from 'react';
 import { Wall, Post as PostType, UserRole, ClassroomCourse, WallType } from '../types';
 import Post from './Post';
 import PostEditor from './PostEditor';
-import { ChevronLeft, Plus, Share2, Settings, X, Check, ZoomIn, ZoomOut, Maximize, Loader2, AlertCircle, LayoutGrid, Lock, Unlock, Image as ImageIcon, Copy, Search, School, Trash2, ShieldAlert, Upload, HardDrive, Link as LinkIcon, Sparkles, Grip, Layers, List, History, Kanban, Info } from 'lucide-react';
+import { ChevronLeft, Plus, Share2, Settings, X, Check, ZoomIn, ZoomOut, Maximize, Loader2, AlertCircle, LayoutGrid, Lock, Unlock, Image as ImageIcon, Copy, Search, School, Trash2, ShieldAlert, Upload, HardDrive, Link as LinkIcon, Sparkles, Grip, Layers, List, History, Kanban, Info, LogIn } from 'lucide-react';
 import { WALL_GRADIENTS } from '../constants';
 import { databaseService } from '../services/databaseService';
 import { classroomService } from '../services/classroomService';
@@ -29,10 +29,11 @@ interface WallViewProps {
   currentUserId: string;
   authorName: string;
   userRole: UserRole;
+  isGuest?: boolean;
 }
 
 const WallView: React.FC<WallViewProps> = ({ 
-  wallId, onBack, onAddPost, onDeletePost, onMovePost, onUpdateWall, onEditPost, currentUserId, authorName, userRole 
+  wallId, onBack, onAddPost, onDeletePost, onMovePost, onUpdateWall, onEditPost, currentUserId, authorName, userRole, isGuest 
 }) => {
   const [wall, setWall] = useState<Wall | null>(null);
   const [showEditor, setShowEditor] = useState(false);
@@ -74,9 +75,11 @@ const WallView: React.FC<WallViewProps> = ({
 
   const zoomRef = useRef(zoom);
   const panRef = useRef(pan);
+  const wallRef = useRef<Wall | null>(null);
 
   useEffect(() => { zoomRef.current = zoom; }, [zoom]);
   useEffect(() => { panRef.current = pan; }, [pan]);
+  useEffect(() => { wallRef.current = wall; }, [wall]);
   
   const optimisticPosts = useRef<Map<string, PostType>>(new Map());
   const optimisticTimers = useRef<Map<string, ReturnType<typeof setTimeout>>>(new Map());
@@ -177,7 +180,11 @@ const WallView: React.FC<WallViewProps> = ({
         
         setWall({ ...remoteWall, posts: combinedPosts });
         setError(null);
-      } else { setError("Wall not found."); }
+      } else { 
+        if (!wallRef.current) {
+            setError("Wall not found."); 
+        }
+      }
     } catch (err: any) { console.error("Sync error:", err); } finally { setIsSyncing(false); }
   }, [wallId, draggingPostId]);
 
@@ -657,6 +664,8 @@ const WallView: React.FC<WallViewProps> = ({
       return children;
   };
 
+  const canContribute = !wall.requireLoginToPost || !isGuest;
+
   return (
     <div 
       ref={containerRef}
@@ -718,7 +727,7 @@ const WallView: React.FC<WallViewProps> = ({
                       onDelete={(id) => { setWall(prev => prev ? ({ ...prev, posts: prev.posts.filter(p => p.id !== id) }) : null); onDeletePost(id); }} 
                       onEdit={handleEditClick} onMove={handlePostMove} onMoveEnd={handlePostMoveEnd}
                       onAddDetail={handleAddDetail}
-                      isOwner={milestone.authorId === currentUserId || isTeacher} 
+                      isOwner={(milestone.authorId === currentUserId || isTeacher) && canContribute} 
                       snapToGrid={wall.snapToGrid} isWallAnonymous={wall.isAnonymous} isWallFrozen={wall.isFrozen}
                       isTimelineMilestone={true}
                     >
@@ -728,7 +737,7 @@ const WallView: React.FC<WallViewProps> = ({
                             post={{...attachment, x: 0, y: 0}} zoom={1}
                             onDelete={(id) => { setWall(prev => prev ? ({ ...prev, posts: prev.posts.filter(p => p.id !== id) }) : null); onDeletePost(id); }} 
                             onEdit={handleEditClick} onMove={() => {}} onMoveEnd={() => {}}
-                            isOwner={attachment.authorId === currentUserId || isTeacher} 
+                            isOwner={(attachment.authorId === currentUserId || isTeacher) && canContribute} 
                             snapToGrid={false} isWallAnonymous={wall.isAnonymous} isWallFrozen={wall.isFrozen}
                           />
                         </div>
@@ -742,7 +751,7 @@ const WallView: React.FC<WallViewProps> = ({
                             onDelete={(id) => { setWall(prev => prev ? ({ ...prev, posts: prev.posts.filter(p => p.id !== id) }) : null); onDeletePost(id); }}
                             onEdit={handleEditClick} onMove={handlePostMove} onMoveEnd={handlePostMoveEnd}
                             onAddDetail={handleAddDetail}
-                            isOwner={isTeacher} // Only teachers move/edit columns
+                            isOwner={isTeacher && canContribute} // Only teachers move/edit columns
                             snapToGrid={false} isWallAnonymous={wall.isAnonymous} isWallFrozen={wall.isFrozen}
                             isKanbanColumn={true}
                         >
@@ -755,7 +764,7 @@ const WallView: React.FC<WallViewProps> = ({
                                                 post={{...card, x: 0, y: 0}} zoom={zoom} 
                                                 onDelete={(id) => { setWall(prev => prev ? ({ ...prev, posts: prev.posts.filter(p => p.id !== id) }) : null); onDeletePost(id); }}
                                                 onEdit={handleEditClick} onMove={handlePostMove} onMoveEnd={handlePostMoveEnd} onDragStart={handlePostDragStart}
-                                                isOwner={card.authorId === currentUserId || isTeacher}
+                                                isOwner={(card.authorId === currentUserId || isTeacher) && canContribute}
                                                 snapToGrid={false} isWallAnonymous={wall.isAnonymous} isWallFrozen={wall.isFrozen}
                                                 isKanbanCard={true}
                                             />
@@ -768,7 +777,7 @@ const WallView: React.FC<WallViewProps> = ({
                                             post={{...card, x: 0, y: 0}} zoom={zoom} 
                                             onDelete={(id) => { setWall(prev => prev ? ({ ...prev, posts: prev.posts.filter(p => p.id !== id) }) : null); onDeletePost(id); }}
                                             onEdit={handleEditClick} onMove={handlePostMove} onMoveEnd={handlePostMoveEnd} onDragStart={handlePostDragStart}
-                                            isOwner={card.authorId === currentUserId || isTeacher}
+                                            isOwner={(card.authorId === currentUserId || isTeacher) && canContribute}
                                             snapToGrid={false} isWallAnonymous={wall.isAnonymous} isWallFrozen={wall.isFrozen}
                                             isKanbanCard={true}
                                         />
@@ -783,7 +792,7 @@ const WallView: React.FC<WallViewProps> = ({
                       key={post.id} post={post} zoom={zoom}
                       onDelete={(id) => { setWall(prev => prev ? ({ ...prev, posts: prev.posts.filter(p => p.id !== id) }) : null); onDeletePost(id); }} 
                       onEdit={handleEditClick} onMove={handlePostMove} onMoveEnd={handlePostMoveEnd}
-                      isOwner={post.authorId === currentUserId || isTeacher} 
+                      isOwner={(post.authorId === currentUserId || isTeacher) && canContribute} 
                       snapToGrid={wall.snapToGrid} isWallAnonymous={wall.isAnonymous} isWallFrozen={wall.isFrozen}
                     />
                   ))
@@ -798,7 +807,7 @@ const WallView: React.FC<WallViewProps> = ({
                   post={{...post, x: 0, y: 0}} zoom={1}
                   onDelete={(id) => { setWall(prev => prev ? ({ ...prev, posts: prev.posts.filter(p => p.id !== id) }) : null); onDeletePost(id); }} 
                   onEdit={handleEditClick} onMove={() => {}} onMoveEnd={() => {}}
-                  isOwner={post.authorId === currentUserId || isTeacher} 
+                  isOwner={(post.authorId === currentUserId || isTeacher) && canContribute} 
                   snapToGrid={false} isWallAnonymous={wall.isAnonymous} isWallFrozen={wall.isFrozen}
                 />
               </div>
@@ -817,10 +826,17 @@ const WallView: React.FC<WallViewProps> = ({
         </div>
       )}
 
-      {!wall.isFrozen && (
+      {!wall.isFrozen && canContribute && (
         <button onClick={() => { setEditingPostId(null); setActiveParentId(null); setShowEditor(true); }} className={`fixed bottom-10 right-10 z-[100] h-20 w-20 bg-cyan-600 text-white rounded-full shadow-2xl hover:scale-110 flex items-center justify-center border-4 border-white/20 active:scale-95 transition-all ${isInteractionBlocked ? 'opacity-0 pointer-events-none scale-50' : 'opacity-100'}`}>
             <Plus size={40} />
         </button>
+      )}
+
+      {!wall.isFrozen && !canContribute && (
+          <div className="fixed bottom-10 right-10 z-[100] px-6 py-3 bg-slate-800 text-white rounded-full shadow-xl flex items-center gap-2 font-bold text-xs border-2 border-slate-700 backdrop-blur-md">
+              <Lock size={14} className="text-slate-400" />
+              Read-only mode. Sign in to contribute.
+          </div>
       )}
 
       {showCopyToast && <div className="fixed top-24 left-1/2 -translate-x-1/2 z-[300] bg-slate-900/90 text-white px-6 py-3 rounded-full shadow-2xl flex items-center gap-3 backdrop-blur-md border border-white/10 animate-in slide-in-from-top-4"><Check size={18} className="text-green-400" /> Link copied!</div>}
@@ -1002,6 +1018,10 @@ const WallView: React.FC<WallViewProps> = ({
                 <div className="flex items-center justify-between p-4 bg-slate-50 rounded-2xl border border-slate-100">
                     <div className="flex flex-col"><span className="font-bold text-slate-800">Anonymous Posting</span><span className="text-xs text-slate-500">Hide names</span></div>
                     <button onClick={() => setSettingsForm({ ...settingsForm, isAnonymous: !settingsForm.isAnonymous })} className={`w-12 h-6 rounded-full relative transition-colors ${settingsForm.isAnonymous ? 'bg-cyan-600' : 'bg-slate-300'}`}><div className={`absolute top-1 w-4 h-4 bg-white rounded-full transition-all ${settingsForm.isAnonymous ? 'left-7' : 'left-1'}`} /></button>
+                </div>
+                <div className="flex items-center justify-between p-4 bg-slate-50 rounded-2xl border border-slate-100">
+                    <div className="flex flex-col"><span className="font-bold text-slate-800">Require Login</span><span className="text-xs text-slate-500">Guests must sign in to post</span></div>
+                    <button onClick={() => setSettingsForm({ ...settingsForm, requireLoginToPost: !settingsForm.requireLoginToPost })} className={`w-12 h-6 rounded-full relative transition-colors ${settingsForm.requireLoginToPost ? 'bg-cyan-600' : 'bg-slate-300'}`}><div className={`absolute top-1 w-4 h-4 bg-white rounded-full transition-all ${settingsForm.requireLoginToPost ? 'left-7' : 'left-1'}`} /></button>
                 </div>
               </section>
 

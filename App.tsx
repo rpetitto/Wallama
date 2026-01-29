@@ -126,7 +126,7 @@ const App: React.FC = () => {
     }
   };
 
-  const handleCreateWall = async (name: string, description: string, type: WallType, icon: string) => {
+  const handleCreateWall = async (name: string, description: string, type: WallType, icon: string, requireLoginToPost: boolean) => {
     if (!user || user.role !== 'teacher') return;
     
     setIsSyncing(true);
@@ -140,7 +140,8 @@ const App: React.FC = () => {
       snapToGrid: true,
       isAnonymous: false,
       privacyType: 'link',
-      icon: icon
+      icon: icon,
+      requireLoginToPost: requireLoginToPost
     };
     const createdWall = await databaseService.createWall(newWallData);
     if (createdWall) {
@@ -235,6 +236,7 @@ const App: React.FC = () => {
         currentUserId={user?.id || ''}
         authorName={user?.name || 'Guest'}
         userRole={user?.role || 'student'}
+        isGuest={user?.isGuest || false}
       />
     );
   }
