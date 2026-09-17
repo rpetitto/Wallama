@@ -21,7 +21,7 @@
   // app, and there is no matching secret to protect: sign-in verifies Google's
   // signature rather than exchanging a code.
   "vars": {
-    "GOOGLE_CLIENT_ID": "6888240288-5v0p6nsoi64q1puv1vpvk1njd398ra8b.apps.googleusercontent.com",
+    "GOOGLE_CLIENT_ID": "6888240288-dc3k5idvqc5q37dvlrd376q78bf7v4sm.apps.googleusercontent.com",
     "ANTHROPIC_MODEL": "claude-opus-5"
   },
 
