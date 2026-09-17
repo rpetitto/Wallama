@@ -15,6 +15,14 @@
     "enabled": true
   },
 
+  // The app is served at wallama.com. `custom_domain` means Cloudflare owns
+  // the DNS record and the certificate for these names, rather than expecting
+  // a record maintained by hand.
+  "routes": [
+    { "pattern": "wallama.com", "custom_domain": true },
+    { "pattern": "www.wallama.com", "custom_domain": true }
+  ],
+
   // A Google client id is public by design — it appears in the page source of
   // every site that offers Google sign-in. It lives here rather than as a secret
   // because the Worker needs it to check that an ID token was issued to *this*
