@@ -8,12 +8,33 @@
  * build compiles Tailwind in the browser on every page load, which is the one
  * thing Tailwind's own docs say not to ship.
  */
+html,
+body {
+  /*
+   * No pull-to-refresh and no rubber-banding. The wall canvas handles its own
+   * panning, and a downward drag on it used to reload the page instead —
+   * React registers touchmove as a passive listener, so the preventDefault()
+   * in the pan handler never had any effect. This is the CSS half of the fix;
+   * the canvas itself also opts out with `touch-none` (see WallView).
+   */
+  overscroll-behavior: none;
+}
+
 body {
   font-family: "Inter", sans-serif;
   margin: 0;
   padding: 0;
   overflow-x: hidden;
   background-color: #f0f9ff; /* Sky 50 */
+  /* A tap on a post or a button shouldn't flash the browser's grey highlight. */
+  -webkit-tap-highlight-color: transparent;
+}
+
+/* Long-pressing a post to drag it must not open iOS's save-image / copy sheet. */
+.post-container,
+.post-container img {
+  -webkit-touch-callout: none;
+  -webkit-user-drag: none;
 }
 
 /* Custom scrollbar for better aesthetics */

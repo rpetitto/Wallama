@@ -94,6 +94,16 @@ The schema is not a deploy step — see below.
   passed to the Worker once, used to ask Classroom whether this person teaches
   anything, and not stored.
 
+- **The canvas owns its touch gestures.** Three things together stop a downward
+  drag on a phone from becoming the browser's pull-to-refresh:
+  `overscroll-behavior: none` on `html`/`body` (index.css), `touch-none` on the
+  canvas element, and a *native* `touchmove` listener registered with
+  `passive: false` in `WallView`. React's own `onTouchMove` is registered
+  passive, so a `preventDefault()` inside a JSX handler does nothing — the
+  original code had one and it never worked. Don't move that logic back into
+  JSX. Overlays are bottom sheets below the `sm` breakpoint and centred
+  dialogs above it; fixed bottom controls offset by `env(safe-area-inset-bottom)`.
+
 - **Tailwind is v3**, compiled at build time. It was `cdn.tailwindcss.com`,
   which compiles in the browser on every page load and which Tailwind's own docs
   tell you not to ship. Staying on 3 keeps every existing class name meaning

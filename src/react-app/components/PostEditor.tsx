@@ -287,14 +287,14 @@ const PostEditor: React.FC<PostEditorProps> = ({ onClose, onSubmit, wallId, auth
 
   const imagePicker = (
     <div className="space-y-4">
-      <div className="flex gap-2 p-1 bg-black/5 rounded-xl overflow-x-auto">
+      <div className="grid grid-cols-4 gap-1 sm:gap-2 p-1 bg-black/5 rounded-xl">
         {[
           { id: 'upload', icon: Upload, label: 'Upload' },
           { id: 'drive', icon: HardDrive, label: 'Drive' },
           { id: 'url', icon: LinkIconSmall, label: 'URL' },
           { id: 'search', icon: Search, label: 'Search' }
         ].map(tab => (
-          <button key={tab.id} onClick={() => setImagePickerTab(tab.id as any)} className={`flex-1 py-2 px-3 rounded-lg flex items-center justify-center gap-2 text-[9px] font-black uppercase tracking-widest transition-all ${imagePickerTab === tab.id ? 'bg-white shadow-sm text-cyan-600' : 'text-slate-500 hover:bg-white/50'}`}>
+          <button key={tab.id} onClick={() => setImagePickerTab(tab.id as any)} className={`py-2.5 sm:py-2 px-1 sm:px-3 rounded-lg flex items-center justify-center gap-1 sm:gap-2 text-[9px] font-black uppercase tracking-widest transition-all ${imagePickerTab === tab.id ? 'bg-white shadow-sm text-cyan-600' : 'text-slate-500 hover:bg-white/50'}`}>
             <tab.icon size={14} /> {tab.label}
           </button>
         ))}
@@ -372,16 +372,21 @@ const PostEditor: React.FC<PostEditorProps> = ({ onClose, onSubmit, wallId, auth
   const isHexColor = selectedColor.startsWith('#');
 
   return (
-    <div className="fixed inset-0 z-[100] flex items-center justify-center p-4 bg-slate-900/60 backdrop-blur-sm animate-in fade-in duration-300">
-      <div className={`w-full max-w-xl rounded-3xl shadow-2xl overflow-hidden flex flex-col max-h-[90vh] transition-colors duration-300 ${!isHexColor && selectedColor === 'bg-white' ? 'bg-white' : (!isHexColor ? selectedColor : '')}`} style={{ backgroundColor: isHexColor ? selectedColor : undefined }}>
-        <div className="p-6 border-b border-black/5 flex items-center justify-between bg-white/50 backdrop-blur-sm">
+    <div className="fixed inset-0 z-[100] flex items-end sm:items-center justify-center sm:p-4 bg-slate-900/60 backdrop-blur-sm animate-in fade-in duration-300">
+      {/*
+        On a phone this is a bottom sheet rather than a centred card: it can use
+        the whole height, and when the keyboard comes up for the text field the
+        sheet scrolls with it instead of being covered by it.
+      */}
+      <div className={`w-full max-w-xl rounded-t-3xl sm:rounded-3xl shadow-2xl overflow-hidden flex flex-col max-h-[100dvh] sm:max-h-[90dvh] transition-colors duration-300 ${!isHexColor && selectedColor === 'bg-white' ? 'bg-white' : (!isHexColor ? selectedColor : '')}`} style={{ backgroundColor: isHexColor ? selectedColor : undefined }}>
+        <div className="p-4 sm:p-6 border-b border-black/5 flex items-center justify-between bg-white/50 backdrop-blur-sm">
           <h3 className="text-xl font-bold text-slate-800">{initialPost ? 'Edit Post' : (isKanbanColumn ? 'New Category' : 'Create Post')}</h3>
-          <button onClick={onClose} className="p-2 hover:bg-black/5 rounded-full transition-colors text-slate-500"><X size={20} /></button>
+          <button onClick={onClose} aria-label="Close" className="p-2 hover:bg-black/5 rounded-full transition-colors text-slate-500"><X size={20} /></button>
         </div>
 
-        <div className="p-6 overflow-y-auto flex-1 space-y-6 custom-scrollbar">
+        <div className="p-4 sm:p-6 overflow-y-auto flex-1 space-y-5 sm:space-y-6 custom-scrollbar">
           {!isKanbanColumn && (
-              <div className="flex gap-2 p-1 bg-black/5 rounded-xl overflow-x-auto">
+              <div className="grid grid-cols-5 gap-1 sm:gap-2 p-1 bg-black/5 rounded-xl">
                 {[
                   { id: 'title', icon: Type, label: 'Title' },
                   { id: 'image', icon: ImageIcon, label: 'Image' },
@@ -389,9 +394,9 @@ const PostEditor: React.FC<PostEditorProps> = ({ onClose, onSubmit, wallId, auth
                   { id: 'gif', icon: Gift, label: 'GIF' },
                   { id: 'video', icon: Video, label: 'Video' }
                 ].map((tab) => (
-                  <button key={tab.id} onClick={() => { setType(tab.id as PostType); setSafetyError(null); }} className={`flex-1 min-w-[60px] flex flex-col items-center gap-1 py-3 px-2 rounded-lg transition-all ${type === tab.id ? 'bg-white shadow-sm text-cyan-600' : 'text-slate-500 hover:bg-black/5'}`}>
+                  <button key={tab.id} onClick={() => { setType(tab.id as PostType); setSafetyError(null); }} className={`min-w-0 flex flex-col items-center gap-1 py-2.5 sm:py-3 px-1 sm:px-2 rounded-lg transition-all ${type === tab.id ? 'bg-white shadow-sm text-cyan-600' : 'text-slate-500 hover:bg-black/5'}`}>
                     <tab.icon size={20} />
-                    <span className="text-[10px] font-bold uppercase tracking-widest">{tab.label}</span>
+                    <span className="text-[9px] sm:text-[10px] font-bold uppercase tracking-widest">{tab.label}</span>
                   </button>
                 ))}
               </div>
@@ -480,7 +485,7 @@ const PostEditor: React.FC<PostEditorProps> = ({ onClose, onSubmit, wallId, auth
 
             <div className="pt-2">
               <label className="block text-xs font-black text-slate-400 uppercase tracking-widest mb-3">{isKanbanColumn ? 'Category Color' : 'Card Color'}</label>
-              <div className="flex gap-3 overflow-x-auto pb-2">
+              <div className="flex flex-wrap gap-3">
                 {WALL_COLORS.map(color => (
                   <button key={color} onClick={() => setSelectedColor(color)} style={{ backgroundColor: color }} className={`h-10 w-10 rounded-full border-2 transition-all shrink-0 ${selectedColor === color ? 'border-cyan-600 scale-110 shadow-lg' : 'border-black/10'}`} />
                 ))}
@@ -492,7 +497,7 @@ const PostEditor: React.FC<PostEditorProps> = ({ onClose, onSubmit, wallId, auth
         {safetyError && <div className="mx-6 mb-2 p-3 bg-red-50 border border-red-200 rounded-xl text-red-700 text-xs font-bold">{safetyError}</div>}
         {uploadError && <div className="mx-6 mb-2 p-3 bg-red-50 border border-red-200 rounded-xl text-red-700 text-xs font-bold">{uploadError}</div>}
 
-        <div className="p-6 border-t border-black/5 bg-white/50 flex justify-end">
+        <div className="p-4 sm:p-6 pb-[calc(env(safe-area-inset-bottom)_+_1rem)] sm:pb-6 border-t border-black/5 bg-white/50 flex justify-end">
           {/* Posting while the file is still going up would save a post whose
               picture doesn't exist yet. */}
           <button onClick={handleSubmit} disabled={isCheckingSafety || isUploading} className="px-8 py-3 bg-cyan-600 text-white rounded-xl font-bold shadow-lg hover:bg-cyan-700 disabled:opacity-50">

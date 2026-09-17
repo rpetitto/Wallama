@@ -367,15 +367,15 @@ const Post: React.FC<PostProps> = ({
             </div>
             <span className="text-xs font-bold text-slate-800 truncate max-w-[120px]">{displayName}</span>
             </div>
-            <div className="flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
+            <div className="flex items-center gap-1 opacity-0 group-hover:opacity-100 [@media(hover:none)]:opacity-100 transition-opacity">
             {isWallFrozen && <Lock size={14} className="text-slate-400 mr-2" />}
             {isOwner && onEdit && !isWallFrozen && (
-                <button onClick={(e) => { e.stopPropagation(); onEdit(post.id); }} className="p-1.5 text-slate-500 hover:text-cyan-600 hover:bg-cyan-50 rounded-lg transition-colors">
+                <button onClick={(e) => { e.stopPropagation(); onEdit(post.id); }} aria-label="Edit post" className="p-2 text-slate-500 hover:text-cyan-600 hover:bg-cyan-50 rounded-lg transition-colors">
                 <Pencil size={14} />
                 </button>
             )}
             {isOwner && !isWallFrozen && (
-                <button onClick={(e) => { e.stopPropagation(); onDelete(post.id); }} className="p-1.5 text-slate-500 hover:text-red-500 hover:bg-red-50 rounded-lg transition-colors">
+                <button onClick={(e) => { e.stopPropagation(); onDelete(post.id); }} aria-label="Delete post" className="p-2 text-slate-500 hover:text-red-500 hover:bg-red-50 rounded-lg transition-colors">
                 <Trash2 size={14} />
                 </button>
             )}
@@ -389,7 +389,7 @@ const Post: React.FC<PostProps> = ({
       {isKanbanColumn && (
           <div className="flex items-center justify-between">
               {renderContent()}
-              <div className="flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
+              <div className="flex items-center gap-1 opacity-0 group-hover:opacity-100 [@media(hover:none)]:opacity-100 transition-opacity">
                 {isOwner && onEdit && !isWallFrozen && (
                     <button onClick={(e) => { e.stopPropagation(); onEdit(post.id); }} className="p-1 text-slate-500 hover:text-cyan-600 hover:bg-cyan-50 rounded-lg transition-colors"><Pencil size={12} /></button>
                 )}

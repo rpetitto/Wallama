@@ -104,14 +104,14 @@ const WallDashboard: React.FC<WallDashboardProps> = ({
 
   return (
     <div className="min-h-screen bg-sky-50">
-      <nav className="bg-white border-b border-sky-100 px-6 py-4 flex items-center justify-between sticky top-0 z-50 shadow-sm">
+      <nav className="bg-white border-b border-sky-100 px-4 sm:px-6 pb-3 sm:pb-4 pt-[calc(env(safe-area-inset-top)_+_0.75rem)] sm:pt-[calc(env(safe-area-inset-top)_+_1rem)] flex items-center justify-between sticky top-0 z-50 shadow-sm">
         <div className="flex items-center gap-3">
           <div className="h-10 w-10 bg-cyan-600 rounded-xl flex items-center justify-center shadow-md">
             <LlamaLogo className="w-8 h-8" />
           </div>
           <h1 className="text-xl font-black text-slate-800 tracking-tight">Wallama</h1>
         </div>
-        <div className="flex items-center gap-6">
+        <div className="flex items-center gap-3 sm:gap-6">
           <div className="flex items-center gap-3">
             <img src={user.avatar} className="h-9 w-9 rounded-full border border-sky-200" alt="Avatar" />
             <div className="hidden sm:block text-left">
@@ -127,7 +127,7 @@ const WallDashboard: React.FC<WallDashboardProps> = ({
         </div>
       </nav>
 
-      <main className="max-w-7xl mx-auto p-6 sm:p-10 space-y-10">
+      <main className="max-w-7xl mx-auto p-4 sm:p-10 space-y-8 sm:space-y-10">
         <div className={`grid grid-cols-1 ${isTeacher ? 'md:grid-cols-2' : 'max-w-xl mx-auto'} gap-6`}>
           <div className="bg-white p-8 rounded-[2.5rem] shadow-sm border border-slate-100 flex flex-col justify-between">
             <div>
@@ -141,12 +141,13 @@ const WallDashboard: React.FC<WallDashboardProps> = ({
                   onChange={(e) => setJoinCode(e.target.value.toUpperCase())}
                   onKeyDown={(e) => e.key === 'Enter' && onJoinWall(joinCode)}
                   placeholder="CODE12"
-                  className="flex-1 px-5 py-4 bg-sky-50 border border-sky-100 rounded-2xl focus:ring-4 focus:ring-cyan-100 outline-none font-black text-lg text-slate-900 uppercase placeholder:text-slate-300 transition-all"
+                  className="flex-1 min-w-0 px-5 py-4 bg-sky-50 border border-sky-100 rounded-2xl focus:ring-4 focus:ring-cyan-100 outline-none font-black text-lg text-slate-900 uppercase placeholder:text-slate-300 transition-all"
                 />
                 <button 
                   onClick={() => onJoinWall(joinCode)}
                   disabled={isSyncing}
-                  className="bg-slate-900 text-white p-4 rounded-2xl hover:bg-slate-800 transition-all active:scale-95 flex items-center gap-2 font-bold px-6 disabled:opacity-50"
+                  aria-label="Join wall"
+                  className="shrink-0 bg-slate-900 text-white p-4 rounded-2xl hover:bg-slate-800 transition-all active:scale-95 flex items-center gap-2 font-bold px-5 sm:px-6 disabled:opacity-50"
                 >
                   {isSyncing ? <Loader2 className="animate-spin" size={20} /> : <><span className="hidden sm:inline">Join</span> <ArrowRight size={20} /></>}
                 </button>
@@ -296,7 +297,7 @@ const WallDashboard: React.FC<WallDashboardProps> = ({
       {/* Shared Modals */}
       {shareWall && (
         <div className="fixed inset-0 z-[300] bg-slate-900/60 backdrop-blur-md flex items-center justify-center p-4" onClick={() => setShareWall(null)}>
-            <div className="bg-white rounded-[2.5rem] shadow-2xl p-8 max-w-sm w-full text-center space-y-6 relative animate-in zoom-in-95" onClick={e => e.stopPropagation()}>
+            <div className="bg-white rounded-[2rem] sm:rounded-[2.5rem] shadow-2xl p-6 sm:p-8 max-w-sm w-full max-h-[calc(100dvh-2rem)] overflow-y-auto text-center space-y-6 relative animate-in zoom-in-95" onClick={e => e.stopPropagation()}>
                 <button onClick={() => setShareWall(null)} className="absolute top-6 right-6 p-2 text-slate-400 hover:text-slate-600"><X size={24} /></button>
                 <h3 className="text-2xl font-black text-slate-800">Join this Wall</h3>
                 <div className="bg-white p-4 rounded-3xl border-2 border-cyan-100 inline-block shadow-sm">
@@ -312,7 +313,7 @@ const WallDashboard: React.FC<WallDashboardProps> = ({
 
       {deleteWallConfirm && (
           <div className="fixed inset-0 z-[500] bg-slate-900/60 backdrop-blur-md flex items-center justify-center p-4" onClick={() => setDeleteWallConfirm(null)}>
-              <div className="bg-white rounded-[2rem] p-8 max-w-sm w-full text-center space-y-6 animate-in zoom-in-95" onClick={e => e.stopPropagation()}>
+              <div className="bg-white rounded-[2rem] p-6 sm:p-8 max-w-sm w-full max-h-[calc(100dvh-2rem)] overflow-y-auto text-center space-y-6 animate-in zoom-in-95" onClick={e => e.stopPropagation()}>
                   <div className="h-16 w-16 bg-red-100 rounded-full flex items-center justify-center mx-auto text-red-600"><ShieldAlert size={32} /></div>
                   <h3 className="text-xl font-black text-slate-800">Delete Wall?</h3>
                   <p className="text-sm text-slate-500 font-medium leading-relaxed">This action cannot be undone. All posts in "{deleteWallConfirm.name}" will be lost forever.</p>
@@ -327,9 +328,9 @@ const WallDashboard: React.FC<WallDashboardProps> = ({
       {showCopyToast && <div className="fixed top-24 left-1/2 -translate-x-1/2 z-[300] bg-slate-900/90 text-white px-6 py-3 rounded-full shadow-2xl flex items-center gap-3 backdrop-blur-md border border-white/10 animate-in slide-in-from-top-4"><Check size={18} className="text-green-400" /> Link copied!</div>}
 
       {showCreateModal && (
-        <div className="fixed inset-0 z-[60] flex items-center justify-center p-4 bg-slate-900/60 backdrop-blur-sm animate-in fade-in duration-300">
-          <div className="bg-white w-full max-w-lg rounded-[2.5rem] p-8 shadow-2xl relative" onClick={e => e.stopPropagation()}>
-            <button onClick={() => { setShowCreateModal(false); setCreateStep(1); }} className="absolute top-6 right-6 text-slate-400 hover:text-slate-600 p-2 rounded-full hover:bg-slate-100 transition-colors">
+        <div className="fixed inset-0 z-[60] flex items-end sm:items-center justify-center sm:p-4 bg-slate-900/60 backdrop-blur-sm animate-in fade-in duration-300">
+          <div className="bg-white w-full max-w-lg rounded-t-[2rem] sm:rounded-[2.5rem] p-6 sm:p-8 pb-[calc(env(safe-area-inset-bottom)_+_1.5rem)] sm:pb-8 max-h-[100dvh] sm:max-h-[90dvh] overflow-y-auto shadow-2xl relative" onClick={e => e.stopPropagation()}>
+            <button onClick={() => { setShowCreateModal(false); setCreateStep(1); }} aria-label="Close" className="absolute top-4 right-4 sm:top-6 sm:right-6 text-slate-400 hover:text-slate-600 p-2 rounded-full hover:bg-slate-100 transition-colors">
               <X size={20} />
             </button>
             

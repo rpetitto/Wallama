@@ -299,10 +299,10 @@ const WallView: React.FC<WallViewProps> = ({
 
   const handleCanvasTouchMove = (e: React.TouchEvent) => {
     if (isInteractionBlocked || !isCanvasMode || !isPanning.current) return;
-    
-    // Crucial for iOS canvas panning
-    if (e.cancelable) e.preventDefault();
 
+    // No preventDefault here on purpose: React registers touchmove as passive,
+    // so it would be ignored. The native listener in the effect below is what
+    // keeps this drag from turning into the browser's pull-to-refresh.
     const touch = e.touches[0];
     const dx = touch.clientX - lastMousePos.current.x;
     const dy = touch.clientY - lastMousePos.current.y;
@@ -311,6 +311,61 @@ const WallView: React.FC<WallViewProps> = ({
   };
 
   const handleCanvasTouchEnd = () => { isPanning.current = false; };
+
+  /**
+   * The real fix for pull-to-refresh, and pinch-to-zoom.
+   *
+   * React registers touchmove as a passive listener, so the `preventDefault()`
+   * in `handleCanvasTouchMove` above has never had any effect — which is why a
+   * downward drag on the canvas reloaded the page on a phone. This listener is
+   * added natively with `passive: false`, where preventDefault still counts.
+   * `touch-none` on the canvas element is the CSS half of the same fix.
+   *
+   * With two fingers down it zooms about the midpoint instead of panning,
+   * using the same maths the zoom buttons use.
+   */
+  const canvasRef = useRef<HTMLElement>(null);
+  const pinch = useRef<{ dist: number; zoom: number } | null>(null);
+
+  useEffect(() => {
+    const el = canvasRef.current;
+    if (!el || !isCanvasMode) return;
+
+    const distance = (t: TouchList) => Math.hypot(t[0].clientX - t[1].clientX, t[0].clientY - t[1].clientY);
+
+    const onStart = (e: TouchEvent) => {
+      if (e.touches.length === 2) {
+        isPanning.current = false;
+        pinch.current = { dist: distance(e.touches), zoom: zoomRef.current };
+      }
+    };
+    const onMove = (e: TouchEvent) => {
+      if (isInteractionBlocked) return;
+      if (e.touches.length === 2 && pinch.current) {
+        e.preventDefault();
+        const next = Math.min(3, Math.max(0.2, pinch.current.zoom * (distance(e.touches) / pinch.current.dist)));
+        performZoomAtPoint(
+          next,
+          (e.touches[0].clientX + e.touches[1].clientX) / 2,
+          (e.touches[0].clientY + e.touches[1].clientY) / 2,
+        );
+        return;
+      }
+      if (isPanning.current) e.preventDefault();
+    };
+    const onEnd = (e: TouchEvent) => { if (e.touches.length < 2) pinch.current = null; };
+
+    el.addEventListener('touchstart', onStart, { passive: true });
+    el.addEventListener('touchmove', onMove, { passive: false });
+    el.addEventListener('touchend', onEnd);
+    el.addEventListener('touchcancel', onEnd);
+    return () => {
+      el.removeEventListener('touchstart', onStart);
+      el.removeEventListener('touchmove', onMove);
+      el.removeEventListener('touchend', onEnd);
+      el.removeEventListener('touchcancel', onEnd);
+    };
+  }, [isCanvasMode, isInteractionBlocked]);
 
   const performZoomAtPoint = (newZoom: number, screenX: number, screenY: number) => {
     if (!isCanvasMode) return;
@@ -730,17 +785,24 @@ const WallView: React.FC<WallViewProps> = ({
       onTouchMove={handleCanvasTouchMove}
       onTouchEnd={handleCanvasTouchEnd}
     >
-      <header className="sticky top-0 z-[100] bg-white/80 backdrop-blur-xl border-b border-slate-200/50 px-6 py-4 flex items-center justify-between">
-        <div className="flex items-center gap-4">
-          <button onClick={onBack} className="p-2 hover:bg-slate-100 rounded-xl text-slate-500 transition-colors"><ChevronLeft size={24} /></button>
-          <div className="flex items-center gap-3">
-             <div className="h-10 w-10 bg-white/30 backdrop-blur-md rounded-xl flex items-center justify-center text-xl shadow-sm border border-slate-200/50">{wall.icon || '📝'}</div>
-             <div>
-                <div className="flex items-center gap-2">
-                    <h2 className="text-xl font-extrabold text-slate-800 drop-shadow-sm leading-tight">{wall.name}</h2>
-                    <button onClick={() => setShowInfo(true)} className="p-1 text-slate-400 hover:text-cyan-600 transition-colors"><Info size={16} /></button>
-                    <div className="flex items-center gap-2">
-                      <span className="text-[9px] font-black text-slate-400 uppercase tracking-widest bg-slate-100 px-1.5 py-0.5 rounded flex items-center gap-1">
+      {/*
+        The left-hand side may shrink and the name truncates; the buttons on the
+        right never do. Without `min-w-0` down the left-hand chain a long wall
+        name pushed Share and Settings clean off a phone screen, and the name
+        itself wrapped to four lines. The type badge is desktop-only: on a phone
+        the layout is obvious from looking at it.
+      */}
+      <header className="sticky top-0 z-[100] bg-white/80 backdrop-blur-xl border-b border-slate-200/50 pt-[env(safe-area-inset-top)]">
+        <div className="px-3 sm:px-6 py-2.5 sm:py-4 flex items-center justify-between gap-2">
+          <div className="flex items-center gap-1.5 sm:gap-4 min-w-0 flex-1">
+            <button onClick={onBack} aria-label="Back to dashboard" className="p-2 hover:bg-slate-100 rounded-xl text-slate-500 transition-colors shrink-0"><ChevronLeft size={24} /></button>
+            <div className="flex items-center gap-2 sm:gap-3 min-w-0">
+               <div className="h-9 w-9 sm:h-10 sm:w-10 shrink-0 bg-white/30 backdrop-blur-md rounded-xl flex items-center justify-center text-lg sm:text-xl shadow-sm border border-slate-200/50">{wall.icon || '📝'}</div>
+               <div className="min-w-0">
+                  <div className="flex items-center gap-1.5 sm:gap-2 min-w-0">
+                      <h2 className="text-base sm:text-xl font-extrabold text-slate-800 drop-shadow-sm leading-tight truncate" title={wall.name}>{wall.name}</h2>
+                      <button onClick={() => setShowInfo(true)} aria-label="About this wall" className="p-1.5 -m-0.5 shrink-0 text-slate-400 hover:text-cyan-600 transition-colors"><Info size={16} /></button>
+                      <span className="hidden sm:flex shrink-0 text-[9px] font-black text-slate-400 uppercase tracking-widest bg-slate-100 px-1.5 py-0.5 rounded items-center gap-1">
                         {wall.type === 'freeform' && <Grip size={8} />}
                         {wall.type === 'wall' && <Layers size={8} />}
                         {wall.type === 'stream' && <List size={8} />}
@@ -748,19 +810,19 @@ const WallView: React.FC<WallViewProps> = ({
                         {wall.type === 'kanban' && <Kanban size={8} />}
                         {wall.type}
                       </span>
-                    </div>
-                </div>
-                <p className="text-[10px] text-slate-500 font-bold uppercase tracking-widest">Code: {wall.joinCode}</p>
-             </div>
+                  </div>
+                  <p className="text-[10px] text-slate-500 font-bold uppercase tracking-widest truncate">Code: {wall.joinCode}</p>
+               </div>
+            </div>
           </div>
-        </div>
-        <div className="flex items-center gap-3">
-          <button onClick={handleShare} className="p-2.5 bg-slate-100 hover:bg-slate-200 text-slate-600 rounded-full border border-slate-200/50 transition-all"><Share2 size={20} /></button>
-          {isTeacher && <button onClick={handleOpenSettings} className="p-2.5 bg-slate-100 text-slate-600 rounded-full border border-slate-200/50 hover:bg-slate-200 transition-all"><Settings size={20} /></button>}
+          <div className="flex items-center gap-2 sm:gap-3 shrink-0">
+            <button onClick={handleShare} aria-label="Share this wall" className="p-2.5 bg-slate-100 hover:bg-slate-200 text-slate-600 rounded-full border border-slate-200/50 transition-all"><Share2 size={20} /></button>
+            {isTeacher && <button onClick={handleOpenSettings} aria-label="Wall settings" className="p-2.5 bg-slate-100 text-slate-600 rounded-full border border-slate-200/50 hover:bg-slate-200 transition-all"><Settings size={20} /></button>}
+          </div>
         </div>
       </header>
 
-      <main id="canvas-root" className={`flex-1 relative ${isCanvasMode ? 'overflow-hidden' : 'overflow-y-auto custom-scrollbar p-6 pb-40'} ${wall.isFrozen || isInteractionBlocked ? 'cursor-default pointer-events-none' : (isCanvasMode ? 'cursor-grab active:cursor-grabbing' : '')}`}>
+      <main id="canvas-root" ref={canvasRef} className={`flex-1 relative ${isCanvasMode ? 'overflow-hidden touch-none' : 'overflow-y-auto custom-scrollbar p-4 sm:p-6 pb-40 touch-pan-y'} ${wall.isFrozen || isInteractionBlocked ? 'cursor-default pointer-events-none' : (isCanvasMode ? 'cursor-grab active:cursor-grabbing' : '')}`}>
         {isCanvasMode ? (
            <div 
              className="absolute origin-top-left transition-transform duration-75"
@@ -867,24 +929,25 @@ const WallView: React.FC<WallViewProps> = ({
         )}
       </main>
 
+      {/* Bottom offsets include the home-indicator inset, so nothing sits under it on a notched phone. */}
       {isCanvasMode && (
-        <div className={`fixed bottom-10 left-10 z-[100] bg-white/90 backdrop-blur-md p-2 rounded-2xl shadow-2xl flex items-center gap-2 border border-slate-200 transition-opacity ${isInteractionBlocked ? 'opacity-50 pointer-events-none' : 'opacity-100'}`}>
-          <button onClick={() => handleManualZoom(-1)} className="p-2 hover:bg-slate-100 rounded-lg text-slate-600"><ZoomOut size={20} /></button>
-          <span className="text-[10px] font-black text-slate-600 w-12 text-center">{Math.round(zoom * 100)}%</span>
-          <button onClick={() => handleManualZoom(1)} className="p-2 hover:bg-slate-100 rounded-lg text-slate-600"><ZoomIn size={20} /></button>
-          <div className="w-px h-6 bg-slate-200 mx-1" />
-          <button onClick={zoomFit} className="p-2 hover:bg-slate-100 rounded-lg text-slate-600 flex items-center gap-2 font-bold text-xs"><Maximize size={18} /> Fit</button>
+        <div className={`fixed bottom-[calc(env(safe-area-inset-bottom)_+_0.75rem)] left-3 sm:bottom-10 sm:left-10 z-[100] bg-white/90 backdrop-blur-md p-1.5 sm:p-2 rounded-2xl shadow-2xl flex items-center gap-1 sm:gap-2 border border-slate-200 transition-opacity ${isInteractionBlocked ? 'opacity-50 pointer-events-none' : 'opacity-100'}`}>
+          <button onClick={() => handleManualZoom(-1)} aria-label="Zoom out" className="p-2 hover:bg-slate-100 rounded-lg text-slate-600"><ZoomOut size={20} /></button>
+          <span className="text-[10px] font-black text-slate-600 w-10 sm:w-12 text-center">{Math.round(zoom * 100)}%</span>
+          <button onClick={() => handleManualZoom(1)} aria-label="Zoom in" className="p-2 hover:bg-slate-100 rounded-lg text-slate-600"><ZoomIn size={20} /></button>
+          <div className="w-px h-6 bg-slate-200 mx-0.5 sm:mx-1" />
+          <button onClick={zoomFit} aria-label="Fit all posts on screen" className="p-2 hover:bg-slate-100 rounded-lg text-slate-600 flex items-center gap-2 font-bold text-xs"><Maximize size={18} /><span className="hidden sm:inline">Fit</span></button>
         </div>
       )}
 
       {!wall.isFrozen && canContribute && (
-        <button onClick={() => { setEditingPostId(null); setActiveParentId(null); setShowEditor(true); }} className={`fixed bottom-10 right-10 z-[100] h-20 w-20 bg-cyan-600 text-white rounded-full shadow-2xl hover:scale-110 flex items-center justify-center border-4 border-white/20 active:scale-95 transition-all ${isInteractionBlocked ? 'opacity-0 pointer-events-none scale-50' : 'opacity-100'}`}>
-            <Plus size={40} />
+        <button onClick={() => { setEditingPostId(null); setActiveParentId(null); setShowEditor(true); }} aria-label="Add a post" className={`fixed bottom-[calc(env(safe-area-inset-bottom)_+_0.75rem)] right-3 sm:bottom-10 sm:right-10 z-[100] h-14 w-14 sm:h-20 sm:w-20 bg-cyan-600 text-white rounded-full shadow-2xl hover:scale-110 flex items-center justify-center border-4 border-white/20 active:scale-95 transition-all ${isInteractionBlocked ? 'opacity-0 pointer-events-none scale-50' : 'opacity-100'}`}>
+            <Plus size={40} className="h-7 w-7 sm:h-10 sm:w-10" />
         </button>
       )}
 
       {!wall.isFrozen && !canContribute && (
-          <div className="fixed bottom-10 left-1/2 -translate-x-1/2 z-[100] px-8 py-4 bg-slate-900/95 text-white rounded-2xl shadow-2xl flex flex-col sm:flex-row items-center gap-4 font-bold border border-white/10 backdrop-blur-xl animate-in slide-in-from-bottom-10 fade-in duration-500 max-w-md w-full sm:w-auto text-center sm:text-left">
+          <div className="fixed bottom-[calc(env(safe-area-inset-bottom)_+_0.75rem)] sm:bottom-10 left-1/2 -translate-x-1/2 z-[100] px-5 sm:px-8 py-3 sm:py-4 bg-slate-900/95 text-white rounded-2xl shadow-2xl flex flex-col sm:flex-row items-center gap-3 sm:gap-4 font-bold border border-white/10 backdrop-blur-xl animate-in slide-in-from-bottom-10 fade-in duration-500 w-[calc(100%-1.5rem)] sm:w-auto max-w-md text-center sm:text-left">
               <div className="flex items-center gap-3">
                   <div className="p-2 bg-white/10 rounded-full"><Lock size={20} className="text-cyan-400" /></div>
                   <div>
@@ -907,7 +970,7 @@ const WallView: React.FC<WallViewProps> = ({
 
       {showShareOverlay && (
         <div className="fixed inset-0 z-[300] bg-slate-900/60 backdrop-blur-md flex items-center justify-center p-4" onClick={() => setShowShareOverlay(false)}>
-            <div className="bg-white rounded-[2.5rem] shadow-2xl p-8 max-w-sm w-full text-center space-y-6 relative animate-in zoom-in-95" onClick={e => e.stopPropagation()}>
+            <div className="bg-white rounded-[2rem] sm:rounded-[2.5rem] shadow-2xl p-6 sm:p-8 max-w-sm w-full max-h-[calc(100dvh-2rem)] overflow-y-auto text-center space-y-5 sm:space-y-6 relative animate-in zoom-in-95" onClick={e => e.stopPropagation()}>
                 <button onClick={() => setShowShareOverlay(false)} className="absolute top-6 right-6 p-2 text-slate-400 hover:text-slate-600"><X size={24} /></button>
                 <h3 className="text-2xl font-black text-slate-800">Join this Wall</h3>
                 <div className="bg-white p-4 rounded-3xl border-2 border-cyan-100 inline-block shadow-sm">
@@ -928,7 +991,7 @@ const WallView: React.FC<WallViewProps> = ({
 
       {showInfo && (
         <div className="fixed inset-0 z-[300] bg-slate-900/60 backdrop-blur-sm flex items-center justify-center p-4" onClick={() => setShowInfo(false)}>
-            <div className="bg-white rounded-2xl p-6 max-w-sm w-full shadow-2xl relative" onClick={e => e.stopPropagation()}>
+            <div className="bg-white rounded-2xl p-6 max-w-sm w-full max-h-[calc(100dvh-2rem)] overflow-y-auto shadow-2xl relative" onClick={e => e.stopPropagation()}>
                 <button onClick={() => setShowInfo(false)} className="absolute top-4 right-4 text-slate-400 hover:text-slate-600"><X size={20} /></button>
                 <div className="flex items-center gap-3 mb-4">
                     <div className="text-3xl">{wall.icon}</div>
@@ -940,13 +1003,13 @@ const WallView: React.FC<WallViewProps> = ({
       )}
 
       {showSettings && isTeacher && (
-        <div className="fixed inset-0 z-[200] flex items-center justify-center p-4 bg-slate-900/60 backdrop-blur-sm animate-in fade-in duration-300 modal-overlay">
-          <div className="bg-white w-full max-w-2xl max-h-[90vh] rounded-[2rem] shadow-2xl flex flex-col overflow-hidden" onClick={e => e.stopPropagation()}>
-             <div className="p-6 border-b border-slate-100 flex items-center justify-between bg-white">
+        <div className="fixed inset-0 z-[200] flex items-end sm:items-center justify-center sm:p-4 bg-slate-900/60 backdrop-blur-sm animate-in fade-in duration-300 modal-overlay">
+          <div className="bg-white w-full max-w-2xl max-h-[100dvh] sm:max-h-[90dvh] rounded-t-[2rem] sm:rounded-[2rem] shadow-2xl flex flex-col overflow-hidden" onClick={e => e.stopPropagation()}>
+             <div className="p-4 sm:p-6 border-b border-slate-100 flex items-center justify-between bg-white">
               <h3 className="text-2xl font-black text-slate-800 tracking-tight">Wall Settings</h3>
               <button onClick={() => setShowSettings(false)} className="p-2 hover:bg-slate-100 rounded-full text-slate-400"><X size={24} /></button>
             </div>
-            <div className="flex-1 overflow-y-auto custom-scrollbar p-6 space-y-8">
+            <div className="flex-1 overflow-y-auto custom-scrollbar p-4 sm:p-6 space-y-6 sm:space-y-8">
               <section className="space-y-4">
                 <h4 className="text-xs font-black text-slate-600 uppercase tracking-widest flex items-center gap-2"><ImageIcon size={14} /> Identity</h4>
                 <div className="grid grid-cols-[auto_1fr] gap-4">
@@ -977,7 +1040,7 @@ const WallView: React.FC<WallViewProps> = ({
               <section className="space-y-4">
                 <h4 className="text-xs font-black text-slate-600 uppercase tracking-widest flex items-center gap-2"><LayoutGrid size={14} /> Background</h4>
                 
-                <div className="flex gap-2 p-1 bg-slate-100 rounded-xl overflow-x-auto">
+                <div className="grid grid-cols-5 gap-1 sm:gap-2 p-1 bg-slate-100 rounded-xl">
                     {[
                         { id: 'presets', icon: LayoutGrid, label: 'Presets' },
                         { id: 'upload', icon: Upload, label: 'Upload' },
@@ -985,8 +1048,8 @@ const WallView: React.FC<WallViewProps> = ({
                         { id: 'url', icon: LinkIcon, label: 'URL' },
                         { id: 'search', icon: Sparkles, label: 'Search' }
                     ].map(tab => (
-                        <button key={tab.id} onClick={() => setBgPickerTab(tab.id as any)} className={`flex-1 py-2 px-3 rounded-lg flex items-center justify-center gap-2 text-[10px] font-black uppercase tracking-widest transition-all ${bgPickerTab === tab.id ? 'bg-white shadow-sm text-cyan-600' : 'text-slate-500 hover:bg-white/50'}`}>
-                            <tab.icon size={14} /> {tab.label}
+                        <button key={tab.id} onClick={() => setBgPickerTab(tab.id as any)} title={tab.label} aria-label={tab.label} className={`py-2.5 sm:py-2 px-1 sm:px-3 rounded-lg flex items-center justify-center gap-2 text-[10px] font-black uppercase tracking-widest transition-all ${bgPickerTab === tab.id ? 'bg-white shadow-sm text-cyan-600' : 'text-slate-500 hover:bg-white/50'}`}>
+                            <tab.icon size={16} /><span className="hidden sm:inline">{tab.label}</span>
                         </button>
                     ))}
                 </div>
@@ -1093,7 +1156,7 @@ const WallView: React.FC<WallViewProps> = ({
 
               <section className="pt-6 border-t border-red-50"><button onClick={() => setShowDeleteConfirm(true)} className="w-full p-4 bg-red-50 text-red-600 rounded-2xl font-bold flex items-center justify-center gap-2 hover:bg-red-100 transition-colors"><Trash2 size={20} /> Delete Wall</button></section>
             </div>
-            <div className="p-6 border-t border-slate-100 bg-slate-50 flex justify-end gap-3">
+            <div className="p-4 sm:p-6 pb-[calc(env(safe-area-inset-bottom)_+_1rem)] sm:pb-6 border-t border-slate-100 bg-slate-50 flex justify-end gap-3">
               <button onClick={() => setShowSettings(false)} className="px-6 py-3 text-slate-500 font-bold hover:text-slate-700">Cancel</button>
               <button onClick={handleSaveSettings} className="px-8 py-3 bg-cyan-600 text-white font-bold rounded-xl shadow-lg hover:bg-cyan-700 transition-colors">Save Changes</button>
             </div>
@@ -1115,8 +1178,8 @@ const WallView: React.FC<WallViewProps> = ({
 
       {showClassroomModal && (
         <div className="fixed inset-0 z-[400] bg-slate-900/60 backdrop-blur-sm flex items-center justify-center p-4" onClick={() => setShowClassroomModal(false)}>
-          <div className="bg-white rounded-[2rem] shadow-2xl p-8 max-w-lg w-full space-y-6 relative" onClick={e => e.stopPropagation()}>
-            <button onClick={() => setShowClassroomModal(false)} className="absolute top-6 right-6 p-2 text-slate-400 hover:text-slate-600"><X size={24} /></button>
+          <div className="bg-white rounded-[2rem] shadow-2xl p-6 sm:p-8 max-w-lg w-full max-h-[calc(100dvh-2rem)] overflow-y-auto space-y-6 relative" onClick={e => e.stopPropagation()}>
+            <button onClick={() => setShowClassroomModal(false)} aria-label="Close" className="absolute top-4 right-4 sm:top-6 sm:right-6 p-2 text-slate-400 hover:text-slate-600"><X size={24} /></button>
             <h3 className="text-2xl font-black text-slate-800">Post to Classroom</h3>
             <div className="space-y-2 max-h-60 overflow-y-auto custom-scrollbar">
                 {courses.map(course => (
