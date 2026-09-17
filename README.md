@@ -58,6 +58,15 @@ this deployment's origin in its authorized JavaScript origins.
 
 The schema is not a deploy step — see below.
 
+## Deploying from GitHub
+
+`.github/workflows/deploy.yml` builds, typechecks and deploys on every push to
+`main`, and on demand from the Actions tab. It needs one repository secret,
+**`CLOUDFLARE_API_TOKEN`**: a token made from the "Edit Cloudflare Workers"
+template with **D1 → Edit** added. Nothing else is stored in GitHub; the
+account id in the workflow is not a secret. Deploying this way instead of from
+a laptop means every deploy is the same deploy.
+
 ## Things worth knowing before changing them
 
 - **Migrations run themselves** on the first request, tracked in `_migrations`,

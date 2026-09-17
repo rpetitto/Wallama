@@ -1,0 +1,55 @@
+# Build and deploy to Cloudflare.
+#
+# Runs on every push to main, and on demand from the Actions tab (or the API).
+# The one thing it needs from the repository is the CLOUDFLARE_API_TOKEN
+# secret — a token made from Cloudflare's "Edit Cloudflare Workers" template
+# with D1 → Edit added, so it can bind the database. The account id below is
+# not a secret: it appears in every dashboard URL.
+#
+# Deploying from here rather than a laptop means the deploy is the same every
+# time, and it works from anywhere the repository does.
+name: Deploy
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+# Never two deploys at once; a second push waits for the first to finish.
+concurrency:
+  group: deploy
+  cancel-in-progress: false
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - run: npm ci
+
+      # The same checks a contributor runs locally; a deploy that skips them
+      # is how a typo reaches a classroom.
+      - run: npm run typecheck
+      - run: npm run build
+
+      - uses: cloudflare/wrangler-action@v3
+        with:
+          apiToken: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          accountId: 78e0f283e7e45753dd05f72a7e5583d4
+          command: deploy
+
+      - name: Confirm the deployment answers
+        run: |
+          for i in $(seq 1 12); do
+            if curl -fsS https://wallama.com/api/health | grep -q '"ok":true'; then
+              echo "wallama.com is up"; exit 0
+            fi
+            sleep 5
+          done
+          echo "wallama.com did not answer after the deploy"; exit 1
