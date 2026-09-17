@@ -12,7 +12,10 @@ name: Deploy
 
 on:
   push:
-    branches: [main]
+    # The migration branch deploys too, until it is merged: GitHub only
+    # registers a workflow's manual trigger once the file is on the default
+    # branch, but a push runs the workflow from whatever ref was pushed.
+    branches: [main, claude/great-bell-l9jxi8]
   workflow_dispatch:
 
 # Never two deploys at once; a second push waits for the first to finish.
