@@ -635,9 +635,9 @@ const WallView: React.FC<WallViewProps> = ({
     }
   };
 
-  // Gemini runs on the Worker now, with the key as a Worker secret rather than
-  // a string compiled into this bundle. (The model name here was misspelled
-  // "gemgemini-3-flash-preview", so this button had never once worked.)
+  // Runs on the Worker now, against Claude, with the key as a Worker secret
+  // rather than a string compiled into this bundle. (Under Gemini the model
+  // name here was misspelled, so this button had never once worked.)
   const performBgSearch = async () => {
     if (!bgSearch) return;
     setIsBgSearching(true);

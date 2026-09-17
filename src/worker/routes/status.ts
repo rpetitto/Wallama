@@ -42,7 +42,7 @@ app.get(
       checks,
       configured: {
         googleSignIn: !!c.env.GOOGLE_CLIENT_ID,
-        ai: !!c.env.GEMINI_API_KEY,
+        ai: !!c.env.ANTHROPIC_API_KEY,
         gifSearch: !!c.env.GIPHY_API_KEY,
         imageSearch: !!c.env.PEXELS_API_KEY,
       },

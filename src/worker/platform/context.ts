@@ -16,9 +16,9 @@ export interface Bindings {
   ASSETS: { fetch(request: Request): Promise<Response> };
   /** Public by design — the Worker checks that an ID token was issued to this app. */
   GOOGLE_CLIENT_ID?: string;
-  GEMINI_MODEL?: string;
+  ANTHROPIC_MODEL?: string;
   /** Secrets: `wrangler secret put`, or .dev.vars locally. Never in wrangler.jsonc. */
-  GEMINI_API_KEY?: string;
+  ANTHROPIC_API_KEY?: string;
   GIPHY_API_KEY?: string;
   PEXELS_API_KEY?: string;
   [key: string]: unknown;

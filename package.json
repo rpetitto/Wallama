@@ -13,6 +13,7 @@
     "typecheck": "tsc -b"
   },
   "dependencies": {
+    "@anthropic-ai/sdk": "^0.126.0",
     "emoji-picker-react": "4.5.16",
     "hono": "^4.13.7",
     "lucide-react": "^0.562.0",

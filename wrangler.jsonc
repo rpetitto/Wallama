@@ -22,7 +22,7 @@
   // signature rather than exchanging a code.
   "vars": {
     "GOOGLE_CLIENT_ID": "6888240288-5v0p6nsoi64q1puv1vpvk1njd398ra8b.apps.googleusercontent.com",
-    "GEMINI_MODEL": "gemini-3-flash-preview"
+    "ANTHROPIC_MODEL": "claude-opus-5"
   },
 
   // The built SPA is served straight from the edge; only /api/* reaches the
