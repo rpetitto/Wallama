@@ -39,7 +39,7 @@
       "binding": "DB",
       "database_name": "wallama",
       // Replace with the id printed by `npx wrangler d1 create wallama`.
-      "database_id": "REPLACE_WITH_D1_DATABASE_ID"
+      "database_id": "388697cf-6d8e-43aa-899f-302d36e5cf93"
     }
   ],
 
