@@ -5,13 +5,19 @@ import Post from './Post';
 import PostEditor from './PostEditor';
 import { ChevronLeft, Plus, Share2, Settings, X, Check, ZoomIn, ZoomOut, Maximize, Loader2, AlertCircle, LayoutGrid, Lock, Unlock, Image as ImageIcon, Copy, Search, School, Trash2, ShieldAlert, Upload, HardDrive, Link as LinkIcon, Sparkles, Grip, Layers, List, History, Kanban, Info, LogIn } from 'lucide-react';
 import { WALL_GRADIENTS } from '../constants';
-import { databaseService } from '../services/databaseService';
-import { classroomService } from '../services/classroomService';
-import { GoogleGenAI } from "@google/genai";
+import { aiService, authService, databaseService } from '../lib/api';
+import { classroomService } from '../lib/classroom';
+import { DRIVE_SCOPES, SIGN_IN_SCOPES, tokenClient, storeAccessToken, type TokenClient } from '../lib/google';
 import EmojiPicker from 'emoji-picker-react';
 
-declare const google: any;
-const GOOGLE_CLIENT_ID = "6888240288-5v0p6nsoi64q1puv1vpvk1njd398ra8b.apps.googleusercontent.com";
+/**
+ * Does this background point at a picture rather than name a gradient?
+ *
+ * An uploaded image is a path under `/api/media` now. `data:` is still here for
+ * a wall whose background was set before the move to R2.
+ */
+const isImageSource = (value?: string) =>
+  !!value && (value.startsWith('http') || value.startsWith('/api/media/') || value.startsWith('data:'));
 
 const TIMELINE_AXIS_Y = 450; 
 const MIN_MILESTONE_SPACING = 340; // 300px card + 40px gap
@@ -23,7 +29,7 @@ interface WallViewProps {
   onBack: () => void;
   onAddPost: (post: Partial<PostType>) => Promise<PostType | null>;
   onDeletePost: (id: string) => void;
-  onMovePost: (id: string, x: number, y: number) => Promise<void>;
+  onMovePost: (id: string, x: number, y: number, parentId?: string | null) => Promise<void>;
   onUpdateWall: (wall: Partial<Wall>) => void;
   onEditPost: (id: string, post: Partial<PostType>) => Promise<PostType | null>; 
   onLogin: (user: User, accessToken: string) => void;
@@ -50,6 +56,8 @@ const WallView: React.FC<WallViewProps> = ({
   const [bgSearch, setBgSearch] = useState('');
   const [bgUrlInput, setBgUrlInput] = useState('');
   const [isBgSearching, setIsBgSearching] = useState(false);
+  const [isUploadingBg, setIsUploadingBg] = useState(false);
+  const [uploadError, setUploadError] = useState<string | null>(null);
   
   const [showShareOverlay, setShowShareOverlay] = useState(false);
   const [showCopyToast, setShowCopyToast] = useState(false);
@@ -92,73 +100,46 @@ const WallView: React.FC<WallViewProps> = ({
   const isInteractionBlocked = showEditor || showSettings || showShareOverlay || showClassroomModal || showDeleteConfirm || showInfo;
 
   useEffect(() => {
-    if (typeof google !== 'undefined' && google.accounts && google.accounts.oauth2) {
-      driveTokenClient.current = google.accounts.oauth2.initTokenClient({
-        client_id: GOOGLE_CLIENT_ID,
-        scope: 'https://www.googleapis.com/auth/drive.readonly',
-        callback: (response: any) => {
-          if (response.access_token) {
-            sessionStorage.setItem('google_drive_token', response.access_token);
-            setDriveToken(response.access_token);
-            fetchDriveFiles(response.access_token);
-          }
-        },
-      });
-
-      classroomTokenClient.current = google.accounts.oauth2.initTokenClient({
-        client_id: GOOGLE_CLIENT_ID,
-        scope: 'https://www.googleapis.com/auth/classroom.courses.readonly https://www.googleapis.com/auth/classroom.announcements',
-        callback: (response: any) => {
-          if (response.access_token) {
-            sessionStorage.setItem('google_access_token', response.access_token);
-            openClassroomModal(response.access_token);
-          }
-        },
-      });
-
-      loginTokenClient.current = google.accounts.oauth2.initTokenClient({
-        client_id: GOOGLE_CLIENT_ID,
-        scope: 'https://www.googleapis.com/auth/classroom.courses.readonly https://www.googleapis.com/auth/classroom.rosters.readonly https://www.googleapis.com/auth/classroom.announcements https://www.googleapis.com/auth/userinfo.profile https://www.googleapis.com/auth/userinfo.email',
-        callback: handleLoginResponse,
-      });
-    }
+    let cancelled = false;
+    const setUp = async () => {
+      const [drive, classroom, login] = await Promise.all([
+        tokenClient(DRIVE_SCOPES, (accessToken) => {
+          sessionStorage.setItem('google_drive_token', accessToken);
+          setDriveToken(accessToken);
+          fetchDriveFiles(accessToken);
+        }),
+        tokenClient(
+          'https://www.googleapis.com/auth/classroom.courses.readonly https://www.googleapis.com/auth/classroom.announcements',
+          (accessToken) => {
+            storeAccessToken(accessToken);
+            openClassroomModal(accessToken);
+          },
+        ),
+        tokenClient(SIGN_IN_SCOPES, handleLoginResponse, () => setIsLoggingIn(false)),
+      ]);
+      if (cancelled) return;
+      driveTokenClient.current = drive;
+      classroomTokenClient.current = classroom;
+      loginTokenClient.current = login;
+    };
+    setUp();
+    return () => { cancelled = true; };
   }, []);
 
-  const handleLoginResponse = async (response: any) => {
-      if (response.error) {
-          setIsLoggingIn(false);
-          return;
-      }
+  /**
+   * Signing in from inside a wall, for a guest who hits "you have to be signed
+   * in to post".
+   *
+   * Same as the sign-in screen: the token goes to our server, which verifies it
+   * with Google and decides the role. This used to read the profile here and
+   * pick the role in the browser, which meant the answer to "am I a teacher?"
+   * was whatever the client felt like saying.
+   */
+  const handleLoginResponse = async (accessToken: string) => {
       setIsLoggingIn(true);
       try {
-          const accessToken = response.access_token;
-          const profileRes = await fetch('https://www.googleapis.com/oauth2/v3/userinfo', {
-            headers: { Authorization: `Bearer ${accessToken}` },
-          });
-          const profile = await profileRes.json();
-
-          let role: UserRole = 'student';
-          try {
-            const classroomRes = await fetch('https://classroom.googleapis.com/v1/courses?teacherId=me&pageSize=1', {
-                headers: { Authorization: `Bearer ${accessToken}` },
-            });
-            if (classroomRes.ok) {
-                const classroomData = await classroomRes.json();
-                if (classroomData.courses && classroomData.courses.length > 0) {
-                    role = 'teacher';
-                }
-            }
-          } catch (e) {}
-
-          const newUser: User = {
-            id: profile.sub,
-            name: profile.name,
-            email: profile.email,
-            role: role,
-            avatar: profile.picture
-          };
-          
-          onLogin(newUser, accessToken); 
+          const user = await authService.signInWithGoogle({ accessToken });
+          onLogin(user, accessToken);
       } catch (error) {
           console.error(error);
       } finally {
@@ -206,7 +187,12 @@ const WallView: React.FC<WallViewProps> = ({
   const syncWall = useCallback(async () => {
     if (Date.now() - lastInteractionTime.current < 500 || draggingPostId) return;
     try {
-      const remoteWall = await databaseService.getWallById(wallId);
+      // An unchanged wall answers 304 with no body at all, which is what this
+      // poll gets almost every time. It used to re-download every post —
+      // including the base64 image data that used to live in them — three times
+      // a second, for every person with the wall open.
+      const { wall: remoteWall, unchanged } = await databaseService.getWall(wallId);
+      if (unchanged) return;
       if (remoteWall) {
         const combinedPosts: PostType[] = [];
         const remoteIds = new Set(remoteWall.posts.map(p => p.id));
@@ -539,10 +525,11 @@ const WallView: React.FC<WallViewProps> = ({
            const finalParentId = optimisticState?.parentId || originalPost.parentId;
            const finalY = optimisticState?.y !== undefined ? optimisticState.y : y;
 
-           if (finalParentId !== originalPost.parentId) {
-               await onEditPost(id, { parentId: finalParentId });
-           }
-           await onMovePost(id, 0, finalY); 
+           // The new column goes with the move rather than through the post
+           // editor: rearranging a shared wall is something any contributor may
+           // do, while rewriting what a post says is the author's and the
+           // teacher's alone.
+           await onMovePost(id, 0, finalY, finalParentId); 
        } else {
            const movedPost = originalPost;
            if (!movedPost) return;
@@ -627,30 +614,37 @@ const WallView: React.FC<WallViewProps> = ({
     setShowEditor(true);
   };
 
-  const handleBgUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
+  /**
+   * A background image goes to R2 and the wall keeps its path.
+   *
+   * It used to be read into a base64 string and stored in the wall row, so the
+   * whole picture came down again with every poll of the wall.
+   */
+  const handleBgUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
-    if (file) {
-      const reader = new FileReader();
-      reader.onloadend = () => setSettingsForm({ ...settingsForm, background: reader.result as string });
-      reader.readAsDataURL(file);
+    e.target.value = '';
+    if (!file) return;
+    setIsUploadingBg(true);
+    try {
+      const { url } = await databaseService.uploadMedia(wallId, file);
+      setSettingsForm(prev => ({ ...prev, background: url }));
+    } catch (err: any) {
+      setUploadError(err?.message ?? "That image couldn't be uploaded.");
+    } finally {
+      setIsUploadingBg(false);
     }
   };
 
+  // Gemini runs on the Worker now, with the key as a Worker secret rather than
+  // a string compiled into this bundle. (The model name here was misspelled
+  // "gemgemini-3-flash-preview", so this button had never once worked.)
   const performBgSearch = async () => {
     if (!bgSearch) return;
     setIsBgSearching(true);
     try {
-        const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
-        const response = await ai.models.generateContent({
-            model: 'gemgemini-3-flash-preview',
-            contents: `Find a direct URL to a high-quality professional wallpaper for "${bgSearch}". Return ONLY the URL string.`,
-            config: { tools: [{ googleSearch: {} }] }
-        });
-        const url = response.text.trim().replace(/`/g, '');
-        if (url.startsWith('http')) {
-            setSettingsForm({ ...settingsForm, background: url });
-        }
-    } catch (e) { console.error(e); } finally { setIsBgSearching(false); }
+        const url = await aiService.findBackground(bgSearch);
+        if (url) setSettingsForm(prev => ({ ...prev, background: url }));
+    } finally { setIsBgSearching(false); }
   };
 
   const handleCopyLink = () => { const link = wall ? (window.location.origin + window.location.pathname + "?wall=" + wall.joinCode) : window.location.href; navigator.clipboard.writeText(link); setShowCopyToast(true); setTimeout(() => setShowCopyToast(false), 2000); };
@@ -704,11 +698,11 @@ const WallView: React.FC<WallViewProps> = ({
   if (!wall) return null;
 
   const isTeacher = (userRole === 'teacher' && wall.teacherId === currentUserId);
-  const backgroundStyle = wall.background.startsWith('http') || wall.background.startsWith('data:') 
+  const backgroundStyle = isImageSource(wall.background)
     ? { backgroundImage: `url(${wall.background})`, backgroundSize: 'cover', backgroundPosition: 'center', backgroundAttachment: 'fixed' }
     : { background: wall.background.includes('from-') ? undefined : wall.background };
 
-  const isImageBackground = (settingsForm.background?.startsWith('http') || settingsForm.background?.startsWith('data:image')) && !WALL_GRADIENTS.includes(settingsForm.background!);
+  const isImageBackground = isImageSource(settingsForm.background) && !WALL_GRADIENTS.includes(settingsForm.background!);
 
   const milestones = wall.type === 'timeline' ? wall.posts.filter(p => !p.parentId) : [];
   const kanbanColumns = wall.type === 'kanban' ? wall.posts.filter(p => !p.parentId).sort((a, b) => a.x - b.x) : [];
@@ -1018,9 +1012,11 @@ const WallView: React.FC<WallViewProps> = ({
                                     <p className="text-xs font-bold text-slate-500">Upload a custom wallpaper</p>
                                 </>
                             )}
-                            <button onClick={() => bgInputRef.current?.click()} className="px-6 py-2 bg-slate-800 text-white rounded-lg text-xs font-bold hover:bg-slate-900 transition-colors">
-                                {isImageBackground ? 'Change File' : 'Choose File'}
+                            <button onClick={() => bgInputRef.current?.click()} disabled={isUploadingBg} className="px-6 py-2 bg-slate-800 text-white rounded-lg text-xs font-bold hover:bg-slate-900 disabled:opacity-60 transition-colors flex items-center gap-2">
+                                {isUploadingBg && <Loader2 size={14} className="animate-spin" />}
+                                {isUploadingBg ? 'Uploading…' : isImageBackground ? 'Change File' : 'Choose File'}
                             </button>
+                            {uploadError && <p className="text-[11px] font-bold text-red-500 max-w-[16rem]">{uploadError}</p>}
                             <input ref={bgInputRef} type="file" accept="image/*" className="hidden" onChange={handleBgUpload} />
                         </div>
                     )}
@@ -1071,7 +1067,7 @@ const WallView: React.FC<WallViewProps> = ({
                                     {isBgSearching ? <Loader2 className="animate-spin" size={14} /> : 'Search'}
                                 </button>
                             </div>
-                            {isImageBackground && !settingsForm.background?.includes('data:image') && (
+                            {isImageBackground && !settingsForm.background?.startsWith('/api/media/') && (
                                 <img src={settingsForm.background} className="h-12 w-20 object-cover rounded-lg mx-auto border" alt="Search Result Preview" />
                             )}
                         </div>
@@ -1107,6 +1103,7 @@ const WallView: React.FC<WallViewProps> = ({
 
       {showEditor && (
         <PostEditor 
+            wallId={wallId}
             authorName={authorName} 
             initialPost={editingPostId ? wall.posts.find(p => p.id === editingPostId) : undefined} 
             parentId={activeParentId || undefined} 

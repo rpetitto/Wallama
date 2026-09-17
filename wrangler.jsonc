@@ -1,0 +1,54 @@
+{
+  // Wallama on Cloudflare: Workers for the API, D1 for walls and posts, R2 for
+  // the images and videos people put on them.
+  //
+  // `nodejs_compat` is required: the request-scoping seam in src/worker/platform
+  // uses AsyncLocalStorage so two requests sharing an isolate can never end up
+  // pointed at the same bindings by accident.
+  "$schema": "node_modules/wrangler/config-schema.json",
+  "name": "wallama",
+  "main": "src/worker/entry.ts",
+  "compatibility_date": "2026-09-01",
+  "compatibility_flags": ["nodejs_compat"],
+
+  "observability": {
+    "enabled": true
+  },
+
+  // A Google client id is public by design — it appears in the page source of
+  // every site that offers Google sign-in. It lives here rather than as a secret
+  // because the Worker needs it to check that an ID token was issued to *this*
+  // app, and there is no matching secret to protect: sign-in verifies Google's
+  // signature rather than exchanging a code.
+  "vars": {
+    "GOOGLE_CLIENT_ID": "6888240288-5v0p6nsoi64q1puv1vpvk1njd398ra8b.apps.googleusercontent.com",
+    "GEMINI_MODEL": "gemini-3-flash-preview"
+  },
+
+  // The built SPA is served straight from the edge; only /api/* reaches the
+  // Worker, so loading a wall costs no Worker invocation for the page itself.
+  "assets": {
+    "directory": "./dist/client",
+    "binding": "ASSETS",
+    "not_found_handling": "single-page-application",
+    "run_worker_first": ["/api/*"]
+  },
+
+  "d1_databases": [
+    {
+      "binding": "DB",
+      "database_name": "wallama",
+      // Replace with the id printed by `npx wrangler d1 create wallama`.
+      "database_id": "REPLACE_WITH_D1_DATABASE_ID"
+    }
+  ],
+
+  // Post images and videos. They used to be base64 data URLs inside the
+  // database row, which D1 will not carry — see src/worker/routes/media.ts.
+  "r2_buckets": [
+    {
+      "binding": "BUCKET",
+      "bucket_name": "wallama-media"
+    }
+  ]
+}

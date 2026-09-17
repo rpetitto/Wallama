@@ -1,12 +1,25 @@
-
 import React, { useState, useEffect } from 'react';
 import { User, Wall, Post, WallType } from './types';
 import Auth from './components/Auth';
 import WallDashboard from './components/WallDashboard';
 import WallView from './components/WallView';
-import { GENERATE_JOIN_CODE } from './constants';
-import { databaseService } from './services/databaseService';
-import { classroomService } from './services/classroomService';
+import { authService, databaseService } from './lib/api';
+import { classroomService } from './lib/classroom';
+import { clearAccessToken, storeAccessToken, storedAccessToken } from './lib/google';
+
+/**
+ * Resolve whatever `?wall=` holds.
+ *
+ * Share links carry the six-character join code, not the wall's id, so both
+ * have to be tried. (The Classroom scan below used to look up only by id, which
+ * is why walls shared to a class never appeared on a student's dashboard: the
+ * link it found always held a code, and a code never matches an id.)
+ */
+const resolveWall = async (reference: string): Promise<Wall | null> => {
+  const looksLikeId = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(reference);
+  const wall = looksLikeId ? await databaseService.getWallById(reference) : null;
+  return wall ?? (await databaseService.getWallByCode(reference));
+};
 
 const App: React.FC = () => {
   const [user, setUser] = useState<User | null>(null);
@@ -17,34 +30,28 @@ const App: React.FC = () => {
 
   useEffect(() => {
     const init = async () => {
-      const savedUser = localStorage.getItem('the_wall_user_v2');
-      const parsedUser: User | null = savedUser ? JSON.parse(savedUser) : null;
-      if (parsedUser) {
-        setUser(parsedUser);
-        loadWalls(parsedUser);
+      // Who we are is the server's answer now, not a JSON blob this browser
+      // wrote to localStorage and could edit at will.
+      const currentUser = await authService.me();
+      if (currentUser) {
+        setUser(currentUser);
+        loadWalls(currentUser);
       }
 
       const urlParams = new URLSearchParams(window.location.search);
       const wallIdFromUrl = urlParams.get('wall');
-      
+
       if (wallIdFromUrl) {
-        let wall: Wall | null = null;
-        
-        if (/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(wallIdFromUrl)) {
-             wall = await databaseService.getWallById(wallIdFromUrl);
-        }
-        
-        if (!wall) {
-             wall = await databaseService.getWallByCode(wallIdFromUrl);
-        }
+        const wall = await resolveWall(wallIdFromUrl);
 
         if (wall) {
-          if (!parsedUser && (wall.privacyType === 'public' || wall.privacyType === 'link')) {
-            const guest = createGuestUser();
-            databaseService.joinWall(wall.id, guest.id, 'student');
-          } else if (parsedUser) {
-            databaseService.joinWall(wall.id, parsedUser.id, parsedUser.role);
+          // A shared link that lands on an open wall gets a guest identity, so
+          // there is a real author behind anything posted from it.
+          let visitor = currentUser;
+          if (!visitor && (wall.privacyType === 'public' || wall.privacyType === 'link')) {
+            visitor = await createGuestUser();
           }
+          if (visitor) await databaseService.joinWall(wall.id);
           setActiveWallId(wall.id);
         }
       }
@@ -56,56 +63,49 @@ const App: React.FC = () => {
 
   const loadWalls = async (currentUser: User) => {
     setIsSyncing(true);
-    let walls: Wall[] = [];
-    if (currentUser.role === 'teacher') {
-        walls = await databaseService.getTeacherWalls(currentUser.id);
-    } else if (currentUser.role === 'student' && !currentUser.isGuest) {
-        walls = await databaseService.getStudentWalls(currentUser.id);
-        
-        const token = sessionStorage.getItem('google_access_token');
-        if (token) {
-            classroomService.findWallsFromAnnouncements(token).then(async (newIds) => {
-                if (newIds.length > 0) {
-                    const existingIds = new Set(walls.map(w => w.id));
-                    const toFetch = newIds.filter(id => !existingIds.has(id));
-                    
-                    if (toFetch.length > 0) {
-                       const fetchedPromises = toFetch.map(id => databaseService.getWallById(id));
-                       const fetched = await Promise.all(fetchedPromises);
-                       const validFetched = fetched.filter(w => w !== null) as Wall[];
-                       
-                       if (validFetched.length > 0) {
-                           setMyWalls(prev => {
-                               const currentIds = new Set(prev.map(p => p.id));
-                               const novel = validFetched.filter(v => !currentIds.has(v.id));
-                               return [...novel, ...prev];
-                           });
-                           validFetched.forEach(w => databaseService.joinWall(w.id, currentUser.id, 'student'));
-                       }
-                    }
-                }
-            });
-        }
-    }
+    const walls = await databaseService.getMyWalls();
     setMyWalls(walls);
     setIsSyncing(false);
+
+    if (currentUser.role === 'student' && !currentUser.isGuest) {
+      const token = storedAccessToken();
+      if (token) {
+        classroomService.findWallsFromAnnouncements(token).then(async (references) => {
+          const known = new Set(walls.flatMap(w => [w.id, w.joinCode]));
+          const toFetch = references.filter(ref => !known.has(ref));
+          if (toFetch.length === 0) return;
+
+          const fetched = await Promise.all(toFetch.map(resolveWall));
+          const validFetched = fetched.filter(w => w !== null) as Wall[];
+          if (validFetched.length === 0) return;
+
+          setMyWalls(prev => {
+            const currentIds = new Set(prev.map(p => p.id));
+            const novel = validFetched.filter(v => !currentIds.has(v.id));
+            return [...novel, ...prev];
+          });
+          validFetched.forEach(w => databaseService.joinWall(w.id));
+        });
+      }
+    }
   };
 
-  const createGuestUser = () => {
-    const guestId = 'guest_' + Math.random().toString(36).substr(2, 9);
-    const guestUser: User = {
-      id: guestId, name: 'Guest Contributor', email: '', role: 'student',
-      avatar: `https://api.dicebear.com/7.x/avataaars/svg?seed=${guestId}`, isGuest: true
-    };
-    setUser(guestUser);
-    localStorage.setItem('the_wall_user_v2', JSON.stringify(guestUser));
-    return guestUser;
+  const createGuestUser = async (): Promise<User | null> => {
+    try {
+      const guest = await authService.signInAsGuest();
+      setUser(guest);
+      return guest;
+    } catch (err) {
+      console.error('Could not start a guest session:', err);
+      return null;
+    }
   };
 
   const handleLogin = async (newUser: User, accessToken: string) => {
     setUser(newUser);
-    localStorage.setItem('the_wall_user_v2', JSON.stringify(newUser));
-    sessionStorage.setItem('google_access_token', accessToken);
+    // Kept in the browser for Classroom and Drive, which are still called
+    // directly with the teacher's own token — the server never stores it.
+    storeAccessToken(accessToken);
     loadWalls(newUser);
   };
 
@@ -115,11 +115,9 @@ const App: React.FC = () => {
     const wall = await databaseService.getWallByCode(code);
     setIsSyncing(false);
     if (wall) {
-      if (!user) createGuestUser();
-      const currentUser = user || JSON.parse(localStorage.getItem('the_wall_user_v2') || '{}');
-      if (currentUser.id) {
-          await databaseService.joinWall(wall.id, currentUser.id, currentUser.role || 'student');
-      }
+      let visitor = user;
+      if (!visitor) visitor = await createGuestUser();
+      if (visitor) await databaseService.joinWall(wall.id);
       setActiveWallId(wall.id);
     } else {
       alert(`Could not find a wall with code "${code}".`);
@@ -128,22 +126,21 @@ const App: React.FC = () => {
 
   const handleCreateWall = async (name: string, description: string, type: WallType, icon: string, requireLoginToPost: boolean) => {
     if (!user || user.role !== 'teacher') return;
-    
+
     setIsSyncing(true);
-    const newWallData: Partial<Wall> = {
+    // The join code is the server's to mint: it has to be unique across every
+    // wall, which is not something a browser can promise.
+    const createdWall = await databaseService.createWall({
       name: name || 'Untitled Wall',
-      type: type,
+      type,
       description: description || 'No description.',
-      joinCode: GENERATE_JOIN_CODE(),
-      teacherId: user.id,
       background: 'from-indigo-500 via-purple-500 to-pink-500',
       snapToGrid: true,
       isAnonymous: false,
       privacyType: 'link',
-      icon: icon,
-      requireLoginToPost: requireLoginToPost
-    };
-    const createdWall = await databaseService.createWall(newWallData);
+      icon,
+      requireLoginToPost,
+    });
     if (createdWall) {
       setMyWalls(prev => [createdWall, ...prev]);
       setActiveWallId(createdWall.id);
@@ -172,16 +169,14 @@ const App: React.FC = () => {
     }
   };
 
+  // The author is whoever the server says is making the request, so a post no
+  // longer carries a name the client chose for itself.
   const handleAddPost = async (postData: Partial<Post>) => {
     if (!user || !activeWallId) return null;
-    const newPost: Partial<Post> = {
+    return await databaseService.addPost(activeWallId, {
       ...postData,
-      authorId: user.id,
-      authorName: user.name,
-      authorAvatar: user.avatar, 
       color: postData.color || 'bg-white',
-    };
-    return await databaseService.addPost(activeWallId, newPost);
+    });
   };
 
   const handleEditPost = async (postId: string, postData: Partial<Post>) => {
@@ -193,16 +188,16 @@ const App: React.FC = () => {
     await databaseService.deletePost(postId);
   };
 
-  const handleMovePost = async (postId: string, x: number, y: number) => {
+  const handleMovePost = async (postId: string, x: number, y: number, parentId?: string | null) => {
     if (activeWallId) {
-      await databaseService.updatePostPosition(postId, x, y, activeWallId);
+      await databaseService.updatePostPosition(postId, x, y, parentId);
     }
   };
 
-  const handleLogout = () => {
+  const handleLogout = async () => {
+    await authService.signOut();
     setUser(null); setActiveWallId(null); setMyWalls([]);
-    localStorage.removeItem('the_wall_user_v2');
-    sessionStorage.removeItem('google_access_token');
+    clearAccessToken();
     window.history.replaceState({}, document.title, window.location.pathname);
   };
 
@@ -210,7 +205,7 @@ const App: React.FC = () => {
     <div className="min-h-screen flex items-center justify-center bg-slate-50">
       <div className="text-center space-y-4">
         <div className="h-10 w-10 border-4 border-indigo-600 border-t-transparent rounded-full animate-spin mx-auto"></div>
-        <p className="font-bold text-slate-400 uppercase tracking-widest text-[10px]">Connecting to SQL...</p>
+        <p className="font-bold text-slate-400 uppercase tracking-widest text-[10px]">Connecting...</p>
       </div>
     </div>
   );

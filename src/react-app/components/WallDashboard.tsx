@@ -3,7 +3,7 @@ import React, { useState, useRef, useEffect } from 'react';
 import { User, Wall, WallType } from '../types';
 import { Plus, LogOut, ArrowRight, Layout, Users, Calendar, X, Loader2, BookOpen, Layers, Grip, List, ChevronRight, Check, History, MoreVertical, Share2, Lock, Unlock, Trash2, Copy, ShieldAlert, Kanban } from 'lucide-react';
 import { LlamaLogo } from './LlamaLogo';
-import { GoogleGenAI } from "@google/genai";
+import { aiService } from "../lib/api";
 import EmojiPicker from 'emoji-picker-react';
 
 interface WallDashboardProps {
@@ -60,21 +60,14 @@ const WallDashboard: React.FC<WallDashboardProps> = ({
     { id: 'kanban', label: 'Kanban', desc: 'Columns for categories with draggable cards.', icon: Kanban }
   ];
 
+  // The Gemini key used to be compiled into this bundle, so anyone who opened
+  // devtools could read it and spend it. The Worker holds it now.
   const generateIcon = async () => {
     if (!newWallName) return;
     setIsGeneratingIcon(true);
     try {
-        const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
-        const response = await ai.models.generateContent({
-            model: 'gemini-3-flash-preview',
-            contents: `Suggest a single emoji that represents the topic: "${newWallName}". Return only the emoji character.`,
-        });
-        const emoji = response.text?.trim();
-        if (emoji && [...emoji].length <= 2) { 
-             setNewWallIcon(emoji);
-        }
-    } catch (e) {
-        console.error(e);
+        const emoji = await aiService.suggestWallIcon(newWallName);
+        if (emoji) setNewWallIcon(emoji);
     } finally {
         setIsGeneratingIcon(false);
     }
@@ -215,7 +208,7 @@ const WallDashboard: React.FC<WallDashboardProps> = ({
                     
                     <div className="relative z-10 flex justify-between items-start">
                       <span className="bg-white/20 backdrop-blur-md px-3 py-1 rounded-full text-[10px] font-bold text-white uppercase tracking-wider border border-white/20">
-                        {wall.posts.length} {wall.posts.length === 1 ? 'Post' : 'Posts'}
+                        {wall.postCount ?? wall.posts.length} {(wall.postCount ?? wall.posts.length) === 1 ? 'Post' : 'Posts'}
                       </span>
                       <div className="flex items-center gap-1">
                         <span className="text-white font-mono text-sm font-bold tracking-widest drop-shadow-md">{wall.joinCode}</span>

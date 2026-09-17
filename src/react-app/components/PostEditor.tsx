@@ -2,25 +2,28 @@
 import React, { useState, useRef, useEffect } from 'react';
 import { PostType, Post } from '../types';
 import { X, Image as ImageIcon, Link as LinkIcon, Gift, Video, Sparkles, Send, Camera, StopCircle, Upload, Loader2, Type, Search, Check, Palette, MessageSquare, ShieldAlert, Save, HardDrive, Bold, Italic, Underline, Code, List, ListOrdered, Quote, LayoutGrid, Link as LinkIconSmall } from 'lucide-react';
-import { checkContentSafety } from '../services/geminiService';
+import { aiService, databaseService, searchService } from '../lib/api';
+import { DRIVE_SCOPES, tokenClient, type TokenClient } from '../lib/google';
 import { WALL_COLORS, WALL_GRADIENTS } from '../constants';
-
-declare const google: any;
 
 interface PostEditorProps {
   onClose: () => void;
   onSubmit: (post: Partial<Post>) => void;
+  /** Which wall's media bucket an upload from this editor belongs to. */
+  wallId: string;
   authorName: string;
   initialPost?: Post;
   parentId?: string;
   isKanbanColumn?: boolean;
 }
 
-const GIPHY_API_KEY = 'eo5zSu2rUveZJB4kxO3S1Rv57KkMbhiQ'; 
-const PEXELS_API_KEY = 'cogJbSeg4haPpdbPHoJfgFvHj03qp0uhvbqSADJRf52ItNL6s4pzCY9B';
-const GOOGLE_CLIENT_ID = "6888240288-5v0p6nsoi64q1puv1vpvk1njd398ra8b.apps.googleusercontent.com";
+/*
+ * The Giphy and Pexels keys used to be string literals right here, which meant
+ * they were in the bundle every visitor downloads. They are Worker secrets now,
+ * and `searchService` asks our own server instead — see src/worker/routes/search.ts.
+ */
 
-const PostEditor: React.FC<PostEditorProps> = ({ onClose, onSubmit, authorName, initialPost, parentId, isKanbanColumn }) => {
+const PostEditor: React.FC<PostEditorProps> = ({ onClose, onSubmit, wallId, authorName, initialPost, parentId, isKanbanColumn }) => {
   const [type, setType] = useState<PostType>('title');
   const [titleText, setTitleText] = useState('');
   const [content, setContent] = useState('');
@@ -29,12 +32,21 @@ const PostEditor: React.FC<PostEditorProps> = ({ onClose, onSubmit, authorName, 
   const [headerImage, setHeaderImage] = useState<string | null>(null);
   const [selectedColor, setSelectedColor] = useState(WALL_COLORS[0]);
   const [isRecording, setIsRecording] = useState(false);
-  const [videoBase64, setVideoBase64] = useState<string | null>(null);
+  const [videoUrl, setVideoUrl] = useState<string | null>(null);
   const [videoThumbnail, setVideoThumbnail] = useState<string | null>(null);
   const [isFetchingLink, setIsFetchingLink] = useState(false);
   const [linkMetadata, setLinkMetadata] = useState<any>(null);
   const [isCheckingSafety, setIsCheckingSafety] = useState(false);
   const [safetyError, setSafetyError] = useState<string | null>(null);
+  const [isUploading, setIsUploading] = useState(false);
+  const [uploadError, setUploadError] = useState<string | null>(null);
+  /**
+   * The R2 key of the file this editor uploaded, if any. The safety check names
+   * it instead of re-sending the picture: the server already has the bytes, and
+   * shipping a photo back up as base64 to ask about it is the pattern this
+   * migration exists to remove.
+   */
+  const [uploadedMediaKey, setUploadedMediaKey] = useState<string | null>(null);
   
   const [imagePickerTab, setImagePickerTab] = useState<'upload' | 'drive' | 'url' | 'search'>('upload');
   const [imageSearch, setImageSearch] = useState('');
@@ -53,7 +65,7 @@ const PostEditor: React.FC<PostEditorProps> = ({ onClose, onSubmit, authorName, 
   const mediaRecorderRef = useRef<MediaRecorder | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
-  const driveTokenClient = useRef<any>(null);
+  const driveTokenClient = useRef<TokenClient | null>(null);
 
   useEffect(() => {
     if (initialPost) {
@@ -66,7 +78,7 @@ const PostEditor: React.FC<PostEditorProps> = ({ onClose, onSubmit, authorName, 
         setContent(initialPost.content || '');
         setHeaderImage(initialPost.metadata?.image || null);
       } else if (pType === 'video') {
-         setVideoBase64(initialPost.content);
+         setVideoUrl(initialPost.content);
          setVideoThumbnail(initialPost.metadata?.videoThumbnail || null);
       } else if (pType === 'image' || pType === 'gif') {
          setUrl(initialPost.content);
@@ -78,19 +90,15 @@ const PostEditor: React.FC<PostEditorProps> = ({ onClose, onSubmit, authorName, 
   }, [initialPost]);
 
   useEffect(() => {
-    if (typeof google !== 'undefined' && google.accounts && google.accounts.oauth2) {
-      driveTokenClient.current = google.accounts.oauth2.initTokenClient({
-        client_id: GOOGLE_CLIENT_ID,
-        scope: 'https://www.googleapis.com/auth/drive.readonly',
-        callback: (response: any) => {
-          if (response.access_token) {
-            sessionStorage.setItem('google_drive_token', response.access_token);
-            setDriveToken(response.access_token);
-            fetchDriveFiles(response.access_token);
-          }
-        },
-      });
-    }
+    let cancelled = false;
+    tokenClient(DRIVE_SCOPES, (accessToken) => {
+      sessionStorage.setItem('google_drive_token', accessToken);
+      setDriveToken(accessToken);
+      fetchDriveFiles(accessToken);
+    }).then((client) => {
+      if (!cancelled) driveTokenClient.current = client;
+    });
+    return () => { cancelled = true; };
   }, []);
 
   const fetchDriveFiles = async (token: string, query: string = '') => {
@@ -112,13 +120,7 @@ const PostEditor: React.FC<PostEditorProps> = ({ onClose, onSubmit, authorName, 
     setIsImageSearching(true);
     setPexelsImages([]);
     try {
-        const res = await fetch(`https://api.pexels.com/v1/search?query=${encodeURIComponent(imageSearch)}&per_page=12&orientation=landscape`, {
-            headers: { Authorization: PEXELS_API_KEY }
-        });
-        const data = await res.json();
-        setPexelsImages(data.photos || []);
-    } catch (e) { 
-        console.error(e); 
+        setPexelsImages(await searchService.images(imageSearch));
     } finally { 
         setIsImageSearching(false); 
     }
@@ -136,16 +138,29 @@ const PostEditor: React.FC<PostEditorProps> = ({ onClose, onSubmit, authorName, 
       }
   };
 
-  const handleImageUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
+  /**
+   * Put the picked file on the wall and use the path it comes back with.
+   *
+   * It used to be read into a base64 data URL and carried in the post row, so a
+   * 3MB photo became a 4MB string that everyone looking at the wall
+   * re-downloaded on every poll.
+   */
+  const handleImageUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
-    if (file) {
-      const reader = new FileReader();
-      reader.onloadend = () => { 
-        if (type === 'title') setHeaderImage(reader.result as string);
-        else setUrl(reader.result as string);
-      };
-      reader.readAsDataURL(file);
-      e.target.value = ''; // Reset input so same file can be selected again
+    e.target.value = ''; // Reset input so the same file can be picked again
+    if (!file) return;
+
+    setIsUploading(true);
+    setUploadError(null);
+    try {
+      const { key, url: uploadedUrl } = await databaseService.uploadMedia(wallId, file);
+      setUploadedMediaKey(key);
+      if (type === 'title') setHeaderImage(uploadedUrl);
+      else setUrl(uploadedUrl);
+    } catch (err: any) {
+      setUploadError(err?.message ?? "That file couldn't be uploaded.");
+    } finally {
+      setIsUploading(false);
     }
   };
 
@@ -165,29 +180,24 @@ const PostEditor: React.FC<PostEditorProps> = ({ onClose, onSubmit, authorName, 
   const searchGifs = async (query: string) => {
     setIsSearchingGifs(true);
     try {
-      let endpoint = `https://api.giphy.com/v1/gifs/search?api_key=${GIPHY_API_KEY}&q=${encodeURIComponent(query)}&limit=25&rating=g`;
-      if (!query || query === 'trending') endpoint = `https://api.giphy.com/v1/gifs/trending?api_key=${GIPHY_API_KEY}&limit=25&rating=g`;
-      const res = await fetch(endpoint);
-      const data = await res.json();
-      setGifs(data.data || []);
-    } catch (err) { console.error(err); } finally { setIsSearchingGifs(false); }
+      setGifs(await searchService.gifs(query));
+    } finally { setIsSearchingGifs(false); }
   };
 
   const fetchLinkMetadata = async (targetUrl: string) => {
     if (!targetUrl || !targetUrl.startsWith('http')) return;
     setIsFetchingLink(true);
     try {
-      const res = await fetch(`https://api.microlink.io?url=${encodeURIComponent(targetUrl)}`);
-      const data = await res.json();
-      if (data.status === 'success') {
+      const preview = await searchService.linkPreview(targetUrl);
+      if (preview) {
         setLinkMetadata({
-          title: data.data.title,
-          description: data.data.description,
-          image: data.data.image?.url || data.data.logo?.url,
-          url: targetUrl
+          title: preview.title,
+          description: preview.description,
+          image: preview.image,
+          url: preview.url,
         });
       }
-    } catch (err) {} finally { setIsFetchingLink(false); }
+    } finally { setIsFetchingLink(false); }
   };
 
   const startRecording = async () => {
@@ -198,15 +208,24 @@ const PostEditor: React.FC<PostEditorProps> = ({ onClose, onSubmit, authorName, 
       mediaRecorderRef.current = recorder;
       const chunks: Blob[] = [];
       recorder.ondataavailable = (e) => chunks.push(e.data);
-      recorder.onstop = () => {
-        const blob = new Blob(chunks, { type: 'video/mp4' });
-        const reader = new FileReader();
-        reader.readAsDataURL(blob);
-        reader.onloadend = () => { 
-          setVideoBase64(reader.result as string);
-          setVideoThumbnail(null);
-        };
+      recorder.onstop = async () => {
         stream.getTracks().forEach(t => t.stop());
+        // MediaRecorder labels its output by what it actually produced, which is
+        // usually webm — the old code asserted mp4 regardless, and the server
+        // has to know the real type to store and serve it.
+        const blob = new Blob(chunks, { type: recorder.mimeType || 'video/webm' });
+        setIsUploading(true);
+        setUploadError(null);
+        try {
+          const { key, url: uploadedUrl } = await databaseService.uploadMedia(wallId, blob);
+          setUploadedMediaKey(key);
+          setVideoUrl(uploadedUrl);
+          setVideoThumbnail(null);
+        } catch (err: any) {
+          setUploadError(err?.message ?? "That recording couldn't be uploaded.");
+        } finally {
+          setIsUploading(false);
+        }
       };
       recorder.start();
       setIsRecording(true);
@@ -222,7 +241,7 @@ const PostEditor: React.FC<PostEditorProps> = ({ onClose, onSubmit, authorName, 
     setSafetyError(null);
 
     if (type === 'video') {
-      submissionContent = videoBase64 || '';
+      submissionContent = videoUrl || '';
       submissionMetadata.videoThumbnail = videoThumbnail;
     } else if (type === 'image' || type === 'gif') {
       submissionContent = url;
@@ -244,9 +263,9 @@ const PostEditor: React.FC<PostEditorProps> = ({ onClose, onSubmit, authorName, 
     const safetyPayload = `${submissionTitle} ${textContentForSafety} ${caption}`.trim();
 
     setIsCheckingSafety(true);
-    const safetyResult = await checkContentSafety(
-        safetyPayload, 
-        (type === 'image' && url.startsWith('data:')) ? url : undefined
+    const safetyResult = await aiService.checkContentSafety(
+        safetyPayload,
+        type === 'image' && uploadedMediaKey ? uploadedMediaKey : undefined,
     );
     
     if (!safetyResult.isSafe) {
@@ -282,9 +301,11 @@ const PostEditor: React.FC<PostEditorProps> = ({ onClose, onSubmit, authorName, 
       </div>
       <div className="min-h-[140px] p-4 bg-black/5 rounded-2xl border border-black/5">
         {imagePickerTab === 'upload' && (
-          <div className="flex flex-col items-center justify-center py-4 cursor-pointer" onClick={() => fileInputRef.current?.click()}>
-            <Upload className="text-slate-400 mb-2" size={32} />
-            <p className="text-xs font-bold text-slate-500">Click to upload</p>
+          <div className="flex flex-col items-center justify-center py-4 cursor-pointer" onClick={() => !isUploading && fileInputRef.current?.click()}>
+            {isUploading
+              ? <Loader2 className="text-cyan-600 mb-2 animate-spin" size={32} />
+              : <Upload className="text-slate-400 mb-2" size={32} />}
+            <p className="text-xs font-bold text-slate-500">{isUploading ? 'Uploading…' : 'Click to upload'}</p>
             <input ref={fileInputRef} type="file" accept="image/*" className="hidden" onChange={handleImageUpload} />
           </div>
         )}
@@ -441,8 +462,8 @@ const PostEditor: React.FC<PostEditorProps> = ({ onClose, onSubmit, authorName, 
             {type === 'video' && (
               <div className="space-y-4">
                 <div className="aspect-video bg-black rounded-2xl overflow-hidden relative shadow-inner">
-                  <video ref={videoRef} autoPlay muted playsInline className={`w-full h-full object-cover ${!isRecording && !videoBase64 ? 'hidden' : ''}`} />
-                  {videoBase64 && !isRecording && <video ref={previewVideoRef} src={videoBase64} className="w-full h-full object-cover absolute inset-0" />}
+                  <video ref={videoRef} autoPlay muted playsInline className={`w-full h-full object-cover ${!isRecording && !videoUrl ? 'hidden' : ''}`} />
+                  {videoUrl && !isRecording && <video ref={previewVideoRef} src={videoUrl} className="w-full h-full object-cover absolute inset-0" />}
                 </div>
                 <div className="flex justify-center gap-4">
                   {!isRecording ? <button onClick={startRecording} className="px-8 py-3 bg-red-600 text-white rounded-full font-bold">Record</button> : <button onClick={stopRecording} className="px-8 py-3 bg-slate-800 text-white rounded-full font-bold">Stop</button>}
@@ -469,10 +490,13 @@ const PostEditor: React.FC<PostEditorProps> = ({ onClose, onSubmit, authorName, 
         </div>
         
         {safetyError && <div className="mx-6 mb-2 p-3 bg-red-50 border border-red-200 rounded-xl text-red-700 text-xs font-bold">{safetyError}</div>}
+        {uploadError && <div className="mx-6 mb-2 p-3 bg-red-50 border border-red-200 rounded-xl text-red-700 text-xs font-bold">{uploadError}</div>}
 
         <div className="p-6 border-t border-black/5 bg-white/50 flex justify-end">
-          <button onClick={handleSubmit} disabled={isCheckingSafety} className="px-8 py-3 bg-cyan-600 text-white rounded-xl font-bold shadow-lg hover:bg-cyan-700 disabled:opacity-50">
-            {isCheckingSafety ? <Loader2 className="animate-spin" size={18} /> : (isKanbanColumn ? 'Create Category' : 'Post to Wall')}
+          {/* Posting while the file is still going up would save a post whose
+              picture doesn't exist yet. */}
+          <button onClick={handleSubmit} disabled={isCheckingSafety || isUploading} className="px-8 py-3 bg-cyan-600 text-white rounded-xl font-bold shadow-lg hover:bg-cyan-700 disabled:opacity-50">
+            {isCheckingSafety || isUploading ? <Loader2 className="animate-spin" size={18} /> : (isKanbanColumn ? 'Create Category' : 'Post to Wall')}
           </button>
         </div>
       </div>

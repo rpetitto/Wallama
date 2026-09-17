@@ -8,9 +8,23 @@ pnpm-debug.log*
 lerna-debug.log*
 
 node_modules
+
+# Build output
 dist
 dist-ssr
 *.local
+
+# TypeScript build info
+*.tsbuildinfo
+tsconfig.*.tsbuildinfo
+
+# Local Cloudflare dev state (miniflare D1/R2 simulation)
+.wrangler/
+
+# Secrets — never committed. `wrangler secret put` for deployed environments,
+# .dev.vars for `wrangler dev`.
+.dev.vars
+.cf-credentials
 
 # Editor directories and files
 .vscode/*

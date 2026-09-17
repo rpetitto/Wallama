@@ -32,7 +32,8 @@ export interface Post {
     description?: string;
     image?: string;
     caption?: string; 
-    videoBlob?: string; 
+    /** A path under /api/media — it used to be a base64 data URL in this field. */
+    videoBlob?: string;
     videoThumbnail?: string; 
     mimeType?: string; 
     iconLink?: string; 
@@ -58,6 +59,17 @@ export interface Wall {
   whitelist?: string[];
   icon?: string;
   requireLoginToPost?: boolean;
+  /**
+   * How many posts the wall has, without the posts themselves. The dashboard
+   * only prints a count, and fetching every post of every wall to render a
+   * number was most of what made signing in slow.
+   */
+  postCount?: number;
+  /**
+   * Bumped by the server on every change to the wall or anything on it. It is
+   * what the polling ETag is built from — see databaseService.getWall.
+   */
+  rev?: number;
 }
 
 export interface GiphyResult {

@@ -1,0 +1,11 @@
+# Copy to .dev.vars for `npm run dev`. Never commit the real file.
+# In deployed environments these are set with `npx wrangler secret put NAME`.
+
+# Gemini: post refinement, the K-12 safety check, and wall icon suggestions.
+GEMINI_API_KEY=
+
+# Giphy: the GIF tab in the post editor.
+GIPHY_API_KEY=
+
+# Pexels: the image-search tab in the post editor and the wall background picker.
+PEXELS_API_KEY=
