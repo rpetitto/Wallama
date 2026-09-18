@@ -294,15 +294,6 @@ export const aiService = {
     }
   },
 
-  async findBackground(query: string): Promise<string | null> {
-    try {
-      const { url } = await api.post<{ url: string | null }>("/api/ai/background", { query });
-      return url;
-    } catch {
-      return null;
-    }
-  },
-
   /**
    * Fails open, as it always has: when the check itself breaks the post goes
    * up. A moderator that blocks the class when the AI is slow is worse than one

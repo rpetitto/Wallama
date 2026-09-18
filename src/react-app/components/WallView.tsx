@@ -3,9 +3,9 @@ import React, { useState, useEffect, useCallback, useRef } from 'react';
 import { Wall, Post as PostType, UserRole, ClassroomCourse, WallType, User } from '../types';
 import Post from './Post';
 import PostEditor from './PostEditor';
-import { ChevronLeft, Plus, Share2, Settings, X, Check, ZoomIn, ZoomOut, Maximize, Loader2, AlertCircle, LayoutGrid, Lock, Unlock, Image as ImageIcon, Copy, Search, School, Trash2, ShieldAlert, Upload, HardDrive, Link as LinkIcon, Sparkles, Grip, Layers, List, History, Kanban, Info, LogIn } from 'lucide-react';
+import { ChevronLeft, Plus, Share2, Settings, X, Check, ZoomIn, ZoomOut, Maximize, Loader2, AlertCircle, LayoutGrid, Lock, Unlock, Image as ImageIcon, Copy, Search, School, Trash2, ShieldAlert, Upload, HardDrive, Link as LinkIcon, Grip, Layers, List, History, Kanban, Info, LogIn } from 'lucide-react';
 import { WALL_GRADIENTS } from '../constants';
-import { aiService, authService, databaseService } from '../lib/api';
+import { authService, databaseService, searchService } from '../lib/api';
 import { classroomService } from '../lib/classroom';
 import { DRIVE_SCOPES, SIGN_IN_SCOPES, tokenClient, storeAccessToken, type TokenClient } from '../lib/google';
 import EmojiPicker from 'emoji-picker-react';
@@ -56,6 +56,7 @@ const WallView: React.FC<WallViewProps> = ({
   const [bgSearch, setBgSearch] = useState('');
   const [bgUrlInput, setBgUrlInput] = useState('');
   const [isBgSearching, setIsBgSearching] = useState(false);
+  const [bgPhotos, setBgPhotos] = useState<any[]>([]);
   const [isUploadingBg, setIsUploadingBg] = useState(false);
   const [uploadError, setUploadError] = useState<string | null>(null);
   
@@ -690,15 +691,14 @@ const WallView: React.FC<WallViewProps> = ({
     }
   };
 
-  // Runs on the Worker now, against Claude, with the key as a Worker secret
-  // rather than a string compiled into this bundle. (Under Gemini the model
-  // name here was misspelled, so this button had never once worked.)
+  // Pexels, through the Worker — the same search the post editor's image tab
+  // uses. This used to ask an AI to guess a wallpaper URL off the open web,
+  // which produced a web page as often as a picture.
   const performBgSearch = async () => {
-    if (!bgSearch) return;
+    if (!bgSearch.trim()) return;
     setIsBgSearching(true);
     try {
-        const url = await aiService.findBackground(bgSearch);
-        if (url) setSettingsForm(prev => ({ ...prev, background: url }));
+        setBgPhotos(await searchService.images(bgSearch));
     } finally { setIsBgSearching(false); }
   };
 
@@ -758,6 +758,8 @@ const WallView: React.FC<WallViewProps> = ({
     : { background: wall.background.includes('from-') ? undefined : wall.background };
 
   const isImageBackground = isImageSource(settingsForm.background) && !WALL_GRADIENTS.includes(settingsForm.background!);
+  const pexelsUrl = (photo: any) => photo?.src?.large2x || photo?.src?.large;
+  const chosenBgPhoto = bgPhotos.find(p => pexelsUrl(p) === settingsForm.background);
 
   const milestones = wall.type === 'timeline' ? wall.posts.filter(p => !p.parentId) : [];
   const kanbanColumns = wall.type === 'kanban' ? wall.posts.filter(p => !p.parentId).sort((a, b) => a.x - b.x) : [];
@@ -1046,7 +1048,7 @@ const WallView: React.FC<WallViewProps> = ({
                         { id: 'upload', icon: Upload, label: 'Upload' },
                         { id: 'drive', icon: HardDrive, label: 'Drive' },
                         { id: 'url', icon: LinkIcon, label: 'URL' },
-                        { id: 'search', icon: Sparkles, label: 'Search' }
+                        { id: 'search', icon: Search, label: 'Photos' }
                     ].map(tab => (
                         <button key={tab.id} onClick={() => setBgPickerTab(tab.id as any)} title={tab.label} aria-label={tab.label} className={`py-2.5 sm:py-2 px-1 sm:px-3 rounded-lg flex items-center justify-center gap-2 text-[10px] font-black uppercase tracking-widest transition-all ${bgPickerTab === tab.id ? 'bg-white shadow-sm text-cyan-600' : 'text-slate-500 hover:bg-white/50'}`}>
                             <tab.icon size={16} /><span className="hidden sm:inline">{tab.label}</span>
@@ -1120,7 +1122,7 @@ const WallView: React.FC<WallViewProps> = ({
                         </div>
                     )}
                     {bgPickerTab === 'search' && (
-                        <div className="space-y-4 py-4 text-center">
+                        <div className="space-y-3 py-2">
                             <div className="flex gap-2">
                                 <div className="relative flex-1">
                                     <input type="text" placeholder="Space, Nature, Art..." className="w-full px-4 py-3 pl-10 bg-white border border-slate-200 rounded-xl text-xs text-slate-800 outline-none focus:ring-2 focus:ring-cyan-500/20" value={bgSearch} onChange={e => setBgSearch(e.target.value)} onKeyDown={e => e.key === 'Enter' && performBgSearch()} />
@@ -1130,9 +1132,22 @@ const WallView: React.FC<WallViewProps> = ({
                                     {isBgSearching ? <Loader2 className="animate-spin" size={14} /> : 'Search'}
                                 </button>
                             </div>
-                            {isImageBackground && !settingsForm.background?.startsWith('/api/media/') && (
-                                <img src={settingsForm.background} className="h-12 w-20 object-cover rounded-lg mx-auto border" alt="Search Result Preview" />
+                            {bgPhotos.length > 0 && (
+                                <div className="grid grid-cols-3 gap-2 max-h-48 overflow-y-auto p-1 custom-scrollbar">
+                                    {bgPhotos.map((photo) => {
+                                        const selected = settingsForm.background === pexelsUrl(photo);
+                                        return (
+                                            <button key={photo.id} onClick={() => setSettingsForm({ ...settingsForm, background: pexelsUrl(photo) })} title={`Photo by ${photo.photographer} on Pexels`} className={`h-20 w-full relative rounded-lg overflow-hidden border-2 transition-all ${selected ? 'border-cyan-600 ring-2 ring-cyan-500/30' : 'border-transparent hover:border-cyan-500'}`}>
+                                                <img src={photo.src?.medium} alt={photo.alt || ''} className="w-full h-full object-cover" />
+                                                {selected && <div className="absolute inset-0 bg-cyan-600/40 flex items-center justify-center"><Check className="text-white" size={20} strokeWidth={3} /></div>}
+                                            </button>
+                                        );
+                                    })}
+                                </div>
                             )}
+                            {chosenBgPhoto && <p className="text-[10px] font-bold text-slate-400 text-center">Photo by {chosenBgPhoto.photographer} on Pexels</p>}
+                        </div>
+                    )}
                         </div>
                     )}
                 </div>

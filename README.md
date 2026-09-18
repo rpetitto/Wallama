@@ -41,7 +41,7 @@ account to run.
 ```
 npx wrangler d1 create wallama            # put the id in wrangler.jsonc
 npx wrangler r2 bucket create wallama-media
-npx wrangler secret put ANTHROPIC_API_KEY # AI refine, safety check, wall icons, wallpaper search
+npx wrangler secret put ANTHROPIC_API_KEY # AI refine, safety check, wall icons
 npx wrangler secret put GIPHY_API_KEY     # the GIF tab in the post editor
 npx wrangler secret put PEXELS_API_KEY    # the image-search tab
 npm run deploy

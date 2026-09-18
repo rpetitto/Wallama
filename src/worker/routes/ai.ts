@@ -186,61 +186,6 @@ app.post(
   }),
 );
 
-/**
- * A wallpaper URL for a wall background, found by searching the web.
- *
- * Web search is a server tool — Claude runs the search on Anthropic's side and
- * the results come back in the same response, so there is no search loop here.
- * `pause_turn` is the one thing that needs handling: it means the turn was cut
- * short mid-tool-use and should be continued by sending the response back.
- */
-app.post(
-  "/api/ai/background",
-  handler(async (c) => {
-    await requireTeacher(c);
-    const { query } = await c.req.json<{ query?: string }>();
-    if (!query?.trim()) throw new HttpError(400, "No search given.");
-
-    try {
-      const client = claude(c.env);
-      const messages: Anthropic.MessageParam[] = [
-        {
-          role: "user",
-          content:
-            `Search the web for a high-quality wallpaper image suitable as a classroom wall background for "${query}". ` +
-            `Reply with only the direct https URL of the image file — nothing else.`,
-        },
-      ];
-
-      let message = await client.messages.create({
-        model: modelFor(c.env),
-        max_tokens: 8192,
-        output_config: EFFORT_LOW,
-        tools: [{ type: "web_search_20260209", name: "web_search", max_uses: 3 }],
-        messages,
-      });
-
-      // Bounded rather than `while`: a turn that keeps pausing should end as a
-      // button that did nothing, not as a Worker burning the teacher's budget.
-      for (let i = 0; i < 3 && message.stop_reason === "pause_turn"; i++) {
-        messages.push({ role: "assistant", content: message.content });
-        message = await client.messages.create({
-          model: modelFor(c.env),
-          max_tokens: 8192,
-          output_config: EFFORT_LOW,
-          tools: [{ type: "web_search_20260209", name: "web_search", max_uses: 3 }],
-          messages,
-        });
-      }
-
-      const url = textOf(message).replace(/`/g, "").trim();
-      return c.json({ url: /^https:\/\/\S+$/.test(url) ? url : null });
-    } catch (err) {
-      throw apiFailed(err);
-    }
-  }),
-);
-
 /** The image types Claude accepts. An SVG upload is skipped rather than refused. */
 const VISIBLE_IMAGE_TYPES = new Set(["image/jpeg", "image/png", "image/gif", "image/webp"]);
 
