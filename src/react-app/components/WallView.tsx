@@ -1095,7 +1095,7 @@ const WallView: React.FC<WallViewProps> = ({
                                         const directLink = file.thumbnailLink?.replace(/=s\d+$/, '=s0');
                                         const wallLink = directLink || file.webViewLink;
                                         return (
-                                            <button key={file.id} onClick={() => setSettingsForm({ ...settingsForm, background: wallLink })} className="relative block aspect-square w-full rounded-xl overflow-hidden border-2 border-slate-200 group">
+                                            <button key={file.id} onClick={() => setSettingsForm({ ...settingsForm, background: wallLink })} className="relative block h-24 w-full rounded-xl overflow-hidden border-2 border-slate-200 group">
                                                 <img src={file.thumbnailLink} className="absolute inset-0 w-full h-full object-cover" alt="" referrerPolicy="no-referrer" />
                                                 {settingsForm.background === wallLink && <div className="absolute inset-0 bg-cyan-600/40 flex items-center justify-center"><Check className="text-white" size={24} strokeWidth={3} /></div>}
                                             </button>

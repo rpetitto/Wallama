@@ -328,7 +328,7 @@ const PostEditor: React.FC<PostEditorProps> = ({ onClose, onSubmit, wallId, auth
             ) : (
               <div className="grid grid-cols-4 gap-2 h-32 overflow-y-auto custom-scrollbar">
                 {driveFiles.map(file => (
-                  <button key={file.id} onClick={() => { if(type==='title') setHeaderImage(file.thumbnailLink); else setUrl(file.webViewLink); }} className="aspect-square bg-white rounded-lg overflow-hidden border">
+                  <button key={file.id} onClick={() => { if(type==='title') setHeaderImage(file.thumbnailLink); else setUrl(file.webViewLink); }} className="h-24 w-full bg-white rounded-lg overflow-hidden border">
                     <img src={file.thumbnailLink} className="w-full h-full object-cover" alt="" referrerPolicy="no-referrer" />
                   </button>
                 ))}
@@ -356,7 +356,7 @@ const PostEditor: React.FC<PostEditorProps> = ({ onClose, onSubmit, wallId, auth
                          <button 
                             key={photo.id} 
                             onClick={() => selectPexelsImage(photo)}
-                            className="aspect-video relative rounded-lg overflow-hidden border-2 border-transparent hover:border-cyan-500 transition-all group"
+                            className="h-20 w-full relative rounded-lg overflow-hidden border-2 border-transparent hover:border-cyan-500 transition-all group"
                          >
                             <img src={photo.src.tiny} className="w-full h-full object-cover" alt={photo.alt} />
                             <div className="absolute inset-0 bg-black/0 group-hover:bg-black/10 transition-colors" />
@@ -471,7 +471,7 @@ const PostEditor: React.FC<PostEditorProps> = ({ onClose, onSubmit, wallId, auth
                 {gifError && <p className="text-xs font-bold text-red-500">{gifError}</p>}
                 <div className="grid grid-cols-3 gap-2 max-h-48 overflow-y-auto p-1 custom-scrollbar">
                   {gifs.map(gif => (
-                    <button key={gif.id} onClick={() => setUrl(gif.images.fixed_height.url)} className={`aspect-square rounded-lg overflow-hidden border-4 transition-all ${url === gif.images.fixed_height.url ? 'border-cyan-600' : 'border-transparent'}`}><img src={gif.images.fixed_height.url} className="w-full h-full object-cover" alt="" /></button>
+                    <button key={gif.id} onClick={() => setUrl(gif.images.fixed_height.url)} className={`h-24 w-full rounded-lg overflow-hidden border-4 transition-all ${url === gif.images.fixed_height.url ? 'border-cyan-600' : 'border-transparent'}`}><img src={gif.images.fixed_height.url} className="w-full h-full object-cover" alt="" /></button>
                   ))}
                 </div>
               </div>
