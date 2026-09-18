@@ -27,9 +27,9 @@ jobs:
   deploy:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
 
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@v5
         with:
           node-version: 22
           cache: npm
@@ -46,6 +46,14 @@ jobs:
           apiToken: ${{ secrets.CLOUDFLARE_API_TOKEN }}
           accountId: 78e0f283e7e45753dd05f72a7e5583d4
           command: deploy
+          # Worker secrets that live in GitHub. Each name here is pushed with
+          # `wrangler secret put` on every deploy, from the matching repository
+          # secret in `env` below — so a key can be set or rotated from a phone
+          # without anyone running wrangler by hand.
+          secrets: |
+            ANTHROPIC_API_KEY
+        env:
+          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
 
       - name: Confirm the deployment answers
         run: |
