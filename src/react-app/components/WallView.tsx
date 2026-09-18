@@ -1148,8 +1148,6 @@ const WallView: React.FC<WallViewProps> = ({
                             {chosenBgPhoto && <p className="text-[10px] font-bold text-slate-400 text-center">Photo by {chosenBgPhoto.photographer} on Pexels</p>}
                         </div>
                     )}
-                        </div>
-                    )}
                 </div>
               </section>
 
