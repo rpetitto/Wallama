@@ -14,12 +14,22 @@
 import { app } from "../platform";
 import { HttpError, handler, requireUser } from "../lib/session";
 
-/** The upstream's own error text can name the key, so it is logged, not returned. */
+/**
+ * Call a third-party API, and say what went wrong if it didn't answer.
+ *
+ * The status and a short excerpt of the body are what a person needs to tell
+ * "wrong key" from "over quota" from "down". Neither can contain the key: it
+ * travels in the request, and none of these services echo it back.
+ */
 async function upstream<T>(name: string, url: string, init?: RequestInit): Promise<T> {
   const res = await fetch(url, init);
   if (!res.ok) {
-    console.error(`${name} error`, res.status, (await res.text()).slice(0, 300));
-    throw new HttpError(502, `${name} didn't answer. Try again in a moment.`);
+    const body = (await res.text()).slice(0, 300);
+    console.error(`${name} error`, res.status, body);
+    throw new HttpError(502, `${name} didn't answer. Try again in a moment.`, {
+      status: res.status,
+      message: body.slice(0, 160),
+    });
   }
   return (await res.json()) as T;
 }
