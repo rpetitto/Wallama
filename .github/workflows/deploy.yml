@@ -41,19 +41,34 @@ jobs:
       - run: npm run typecheck
       - run: npm run build
 
+      # Worker secrets that live in GitHub. Any of these present as a repository
+      # secret is pushed into the Worker with `wrangler secret put` on every
+      # deploy; one that isn't is skipped, not fatal. That is what lets a key be
+      # set or rotated from a phone — add or update the repository secret, push
+      # or re-run, done. `printf '%s'` rather than echo: a trailing newline
+      # inside a key is an invisible way to get a 401.
+      - name: Push Worker secrets that GitHub holds
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: 78e0f283e7e45753dd05f72a7e5583d4
+          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+          GIPHY_API_KEY: ${{ secrets.GIPHY_API_KEY }}
+          PEXELS_API_KEY: ${{ secrets.PEXELS_API_KEY }}
+        run: |
+          for name in ANTHROPIC_API_KEY GIPHY_API_KEY PEXELS_API_KEY; do
+            if [ -n "${!name}" ]; then
+              printf '%s' "${!name}" | npx wrangler secret put "$name"
+              echo "pushed $name"
+            else
+              echo "skipped $name (no repository secret of that name)"
+            fi
+          done
+
       - uses: cloudflare/wrangler-action@v3
         with:
           apiToken: ${{ secrets.CLOUDFLARE_API_TOKEN }}
           accountId: 78e0f283e7e45753dd05f72a7e5583d4
           command: deploy
-          # Worker secrets that live in GitHub. Each name here is pushed with
-          # `wrangler secret put` on every deploy, from the matching repository
-          # secret in `env` below — so a key can be set or rotated from a phone
-          # without anyone running wrangler by hand.
-          secrets: |
-            ANTHROPIC_API_KEY
-        env:
-          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
 
       - name: Confirm the deployment answers
         run: |

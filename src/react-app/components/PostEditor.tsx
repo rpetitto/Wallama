@@ -59,6 +59,7 @@ const PostEditor: React.FC<PostEditorProps> = ({ onClose, onSubmit, wallId, auth
   const [gifSearch, setGifSearch] = useState('');
   const [gifs, setGifs] = useState<any[]>([]);
   const [isSearchingGifs, setIsSearchingGifs] = useState(false);
+  const [gifError, setGifError] = useState<string | null>(null);
 
   const videoRef = useRef<HTMLVideoElement>(null);
   const previewVideoRef = useRef<HTMLVideoElement>(null);
@@ -179,10 +180,21 @@ const PostEditor: React.FC<PostEditorProps> = ({ onClose, onSubmit, wallId, auth
 
   const searchGifs = async (query: string) => {
     setIsSearchingGifs(true);
+    setGifError(null);
     try {
-      setGifs(await searchService.gifs(query));
+      const { gifs: found, error } = await searchService.gifs(query);
+      setGifs(found);
+      if (error) setGifError(error);
+      else if (found.length === 0) setGifError(`No GIFs found for "${query}".`);
     } finally { setIsSearchingGifs(false); }
   };
+
+  // The tab shouldn't open onto an empty grid; trending is what the old
+  // version's "no query" branch was for, it just never got called.
+  useEffect(() => {
+    if (type === 'gif' && gifs.length === 0 && !gifError) searchGifs('trending');
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [type]);
 
   const fetchLinkMetadata = async (targetUrl: string) => {
     if (!targetUrl || !targetUrl.startsWith('http')) return;
@@ -454,8 +466,9 @@ const PostEditor: React.FC<PostEditorProps> = ({ onClose, onSubmit, wallId, auth
               <div className="space-y-4">
                 <div className="flex gap-2">
                   <input type="text" value={gifSearch} onChange={(e) => setGifSearch(e.target.value)} onKeyDown={(e) => e.key === 'Enter' && searchGifs(gifSearch)} placeholder="Search Giphy..." className="flex-1 p-4 bg-white/50 border border-black/5 rounded-xl outline-none text-slate-900" />
-                  <button onClick={() => searchGifs(gifSearch)} className="px-6 bg-cyan-600 text-white rounded-xl font-bold">Find</button>
+                  <button onClick={() => searchGifs(gifSearch)} disabled={isSearchingGifs} className="px-6 bg-cyan-600 text-white rounded-xl font-bold disabled:opacity-60">{isSearchingGifs ? <Loader2 size={18} className="animate-spin" /> : 'Find'}</button>
                 </div>
+                {gifError && <p className="text-xs font-bold text-red-500">{gifError}</p>}
                 <div className="grid grid-cols-3 gap-2 max-h-48 overflow-y-auto p-1 custom-scrollbar">
                   {gifs.map(gif => (
                     <button key={gif.id} onClick={() => setUrl(gif.images.fixed_height.url)} className={`aspect-square rounded-lg overflow-hidden border-4 transition-all ${url === gif.images.fixed_height.url ? 'border-cyan-600' : 'border-transparent'}`}><img src={gif.images.fixed_height.url} className="w-full h-full object-cover" alt="" /></button>

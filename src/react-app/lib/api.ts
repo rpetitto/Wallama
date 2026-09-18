@@ -11,7 +11,8 @@
 import type { Post, User, Wall } from "../types";
 
 export class ApiError extends Error {
-  constructor(public status: number, message: string) {
+  /** Whatever the server attached under `detail` — an upstream status, say. */
+  constructor(public status: number, message: string, public detail?: Record<string, unknown>) {
     super(message);
   }
 }
@@ -28,13 +29,15 @@ async function request<T>(path: string, init: RequestInit = {}): Promise<T> {
 
   if (!res.ok) {
     let message = `${res.status} ${res.statusText}`;
+    let detail: Record<string, unknown> | undefined;
     try {
       const body = await res.json();
       if (body?.error) message = body.error;
+      if (body?.detail) detail = body.detail;
     } catch {
       /* non-JSON error body */
     }
-    throw new ApiError(res.status, message);
+    throw new ApiError(res.status, message, detail);
   }
 
   if (res.status === 204) return undefined as T;
@@ -316,13 +319,20 @@ export const aiService = {
 };
 
 export const searchService = {
-  async gifs(query: string): Promise<any[]> {
+  /**
+   * Returns the failure alongside the (empty) results rather than hiding it:
+   * a GIF tab that shows nothing looks like "no results", and the difference
+   * between that and "the service is misconfigured" is the whole point.
+   */
+  async gifs(query: string): Promise<{ gifs: any[]; error?: string }> {
     try {
       const { gifs } = await api.get<{ gifs: any[] }>(`/api/search/gifs?q=${encodeURIComponent(query)}`);
-      return gifs;
+      return { gifs };
     } catch (err) {
       console.error("GIF search failed:", err);
-      return [];
+      const status = err instanceof ApiError ? err.detail?.status : undefined;
+      const message = err instanceof Error ? err.message : "GIF search failed.";
+      return { gifs: [], error: status ? `${message} (upstream ${status})` : message };
     }
   },
 

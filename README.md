@@ -61,14 +61,17 @@ The schema is not a deploy step — see below.
 ## Deploying from GitHub
 
 `.github/workflows/deploy.yml` builds, typechecks and deploys on every push to
-`main`, and on demand from the Actions tab. It needs two repository secrets:
+`main`, and on demand from the Actions tab. It needs one repository secret,
+**`CLOUDFLARE_API_TOKEN`** — a token made from the "Edit Cloudflare Workers"
+template with **D1 → Edit** added.
 
-- **`CLOUDFLARE_API_TOKEN`** — a token made from the "Edit Cloudflare Workers"
-  template with **D1 → Edit** added.
-- **`ANTHROPIC_API_KEY`** — pushed into the Worker with `wrangler secret put`
-  on every deploy, so it can be set or rotated without a laptop. Make it inside
-  a workspace; an organization-level key needs `ANTHROPIC_WORKSPACE_ID` in
-  `wrangler.jsonc` as well, or every request is refused with a 400. To manage
+It also carries the Worker's own secrets: any of **`ANTHROPIC_API_KEY`**,
+**`GIPHY_API_KEY`** and **`PEXELS_API_KEY`** present as a repository secret is
+pushed into the Worker with `wrangler secret put` on every deploy, and one that
+isn't is skipped. So a key is set or rotated by editing the repository secret
+and re-running the deploy — no laptop, no wrangler. (Make the Anthropic key
+inside a workspace; an organization-level key needs `ANTHROPIC_WORKSPACE_ID`
+in `wrangler.jsonc` as well, or every request is refused with a 400.) To manage
   another Worker secret the same way, add its name to the `secrets:` list in
   the workflow and the matching repository secret.
 
