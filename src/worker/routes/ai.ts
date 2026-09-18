@@ -43,19 +43,34 @@ function textOf(message: Anthropic.Message): string {
 }
 
 /**
- * Turn an API failure into something safe to show a teacher.
+ * What went wrong upstream, in a form safe to return.
  *
- * The upstream message can name the key or the organization, so it is logged
- * rather than returned.
+ * The status and the error *type* can't leak anything. The message is another
+ * matter: an authentication or permission error can name the key or the
+ * organization, so it stays in the server log — but a request-shape complaint
+ * (`invalid_request_error`) names the offending field and nothing else, which
+ * is exactly what's needed to fix it, so that one travels.
  */
+function upstreamDetail(err: unknown): Record<string, unknown> {
+  if (err instanceof Anthropic.APIError) {
+    const body = err.error as { error?: { type?: string; message?: string } } | undefined;
+    const type = body?.error?.type;
+    return {
+      status: err.status,
+      type,
+      ...(type === "invalid_request_error" ? { message: body?.error?.message } : {}),
+    };
+  }
+  const e = err as Error | undefined;
+  return { type: e?.name ?? "unknown", message: e?.message?.slice(0, 200) };
+}
+
+/** Turn an API failure into something safe to show a teacher. */
 function apiFailed(err: unknown): HttpError {
   if (err instanceof HttpError) return err;
-  if (err instanceof Anthropic.APIError) {
-    console.error("Claude API error", err.status, err.message);
-    return new HttpError(502, "The AI service didn't answer. Try again in a moment.");
-  }
-  console.error("Claude call failed", err);
-  return new HttpError(502, "The AI service didn't answer. Try again in a moment.");
+  const detail = upstreamDetail(err);
+  console.error("Claude call failed", err instanceof Anthropic.APIError ? `${err.status} ${err.message}` : err);
+  return new HttpError(502, "The AI service didn't answer. Try again in a moment.", detail);
 }
 
 /** Tidy up or riff on what someone typed. */
@@ -98,6 +113,7 @@ app.post(
     const { subject } = await c.req.json<{ subject?: string }>();
     if (!subject?.trim()) throw new HttpError(400, "No subject given.");
 
+    let detail: Record<string, unknown> | undefined;
     try {
       const message = await claude(c.env).messages.create({
         model: modelFor(c.env),
@@ -129,8 +145,9 @@ app.post(
     } catch (err) {
       if (err instanceof HttpError) throw err;
       console.error("topics failed", err);
+      detail = upstreamDetail(err);
     }
-    return c.json({ topics: ["General Discussion", "Reflections", "Questions", "Resources"] });
+    return c.json({ topics: ["General Discussion", "Reflections", "Questions", "Resources"], fallback: true, ...(detail ? { detail } : {}) });
   }),
 );
 
@@ -289,11 +306,14 @@ app.post(
       const result = JSON.parse(textOf(message) || '{"isSafe":true}') as { isSafe?: boolean; reason?: string };
       return c.json({
         isSafe: result.isSafe === true,
+        checked: true,
         reason: result.isSafe ? undefined : result.reason || "Content flagged as inappropriate.",
       });
     } catch (err) {
+      // `checked: false` is how a fail-open is told apart from a real verdict —
+      // without it, a dead moderator and a working one look identical.
       console.warn("Safety check failed (allowing content):", err);
-      return c.json({ isSafe: true });
+      return c.json({ isSafe: true, checked: false, detail: upstreamDetail(err) });
     }
   }),
 );

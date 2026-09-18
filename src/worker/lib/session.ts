@@ -22,7 +22,12 @@ export const uid = () => crypto.randomUUID();
 export const now = () => new Date().toISOString();
 
 export class HttpError extends Error {
-  constructor(public status: number, message: string) {
+  /**
+   * `detail` is for the client to show or log alongside the message — the
+   * upstream status of a failed AI call, say. Never put anything in it that
+   * the message was kept generic to avoid leaking.
+   */
+  constructor(public status: number, message: string, public detail?: Record<string, unknown>) {
     super(message);
   }
 }
@@ -259,7 +264,9 @@ export function handler(fn: (c: Context) => Promise<Response>) {
     try {
       return await fn(c);
     } catch (err: any) {
-      if (err instanceof HttpError) return c.json({ error: err.message }, err.status as any);
+      if (err instanceof HttpError) {
+        return c.json({ error: err.message, ...(err.detail ? { detail: err.detail } : {}) }, err.status as any);
+      }
       console.error("Unhandled error:", err?.stack || err);
       return c.json({ error: err?.message ?? "Server error" }, 500);
     }
