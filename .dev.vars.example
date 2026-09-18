@@ -3,6 +3,8 @@
 
 # Claude: post refinement, the K-12 safety check, wall icon suggestions, and the
 # AI wallpaper search. https://console.anthropic.com/settings/keys
+# Make the key inside a workspace. An organization-level key also works, but
+# then the workspace to bill has to be named: ANTHROPIC_WORKSPACE_ID=wrkspc_...
 ANTHROPIC_API_KEY=
 
 # Giphy: the GIF tab in the post editor.

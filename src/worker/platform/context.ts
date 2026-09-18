@@ -17,6 +17,12 @@ export interface Bindings {
   /** Public by design — the Worker checks that an ID token was issued to this app. */
   GOOGLE_CLIENT_ID?: string;
   ANTHROPIC_MODEL?: string;
+  /**
+   * Only needed when ANTHROPIC_API_KEY is an organization-level key rather
+   * than a workspace key: the API then requires the workspace to bill named
+   * on every request. A key created inside a workspace needs nothing here.
+   */
+  ANTHROPIC_WORKSPACE_ID?: string;
   /** Secrets: `wrangler secret put`, or .dev.vars locally. Never in wrangler.jsonc. */
   ANTHROPIC_API_KEY?: string;
   GIPHY_API_KEY?: string;

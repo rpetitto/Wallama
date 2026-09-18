@@ -31,6 +31,9 @@
   "vars": {
     "GOOGLE_CLIENT_ID": "6888240288-dc3k5idvqc5q37dvlrd376q78bf7v4sm.apps.googleusercontent.com",
     "ANTHROPIC_MODEL": "claude-opus-5"
+    // If ANTHROPIC_API_KEY is an organization-level key rather than one made
+    // inside a workspace, add the workspace to bill here — it's an identifier,
+    // not a secret:  "ANTHROPIC_WORKSPACE_ID": "wrkspc_..."
   },
 
   // The built SPA is served straight from the edge; only /api/* reaches the

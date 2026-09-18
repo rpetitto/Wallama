@@ -26,9 +26,16 @@ const DEFAULT_MODEL = "claude-opus-5";
  */
 const EFFORT_LOW = { effort: "low" } as const;
 
-function claude(env: { ANTHROPIC_API_KEY?: string }): Anthropic {
+function claude(env: { ANTHROPIC_API_KEY?: string; ANTHROPIC_WORKSPACE_ID?: string }): Anthropic {
   if (!env.ANTHROPIC_API_KEY) throw new HttpError(503, "AI features aren't configured for this deployment.");
-  return new Anthropic({ apiKey: env.ANTHROPIC_API_KEY });
+  return new Anthropic({
+    apiKey: env.ANTHROPIC_API_KEY,
+    // An organization-level key has to say which workspace each request
+    // belongs to; a workspace-scoped key already knows, and sends nothing.
+    ...(env.ANTHROPIC_WORKSPACE_ID
+      ? { defaultHeaders: { "anthropic-workspace-id": env.ANTHROPIC_WORKSPACE_ID } }
+      : {}),
+  });
 }
 
 const modelFor = (env: { ANTHROPIC_MODEL?: string }) => env.ANTHROPIC_MODEL || DEFAULT_MODEL;

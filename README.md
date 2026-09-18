@@ -66,7 +66,9 @@ The schema is not a deploy step — see below.
 - **`CLOUDFLARE_API_TOKEN`** — a token made from the "Edit Cloudflare Workers"
   template with **D1 → Edit** added.
 - **`ANTHROPIC_API_KEY`** — pushed into the Worker with `wrangler secret put`
-  on every deploy, so it can be set or rotated without a laptop. To manage
+  on every deploy, so it can be set or rotated without a laptop. Make it inside
+  a workspace; an organization-level key needs `ANTHROPIC_WORKSPACE_ID` in
+  `wrangler.jsonc` as well, or every request is refused with a 400. To manage
   another Worker secret the same way, add its name to the `secrets:` list in
   the workflow and the matching repository secret.
 
