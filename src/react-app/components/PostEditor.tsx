@@ -34,6 +34,12 @@ const PostEditor: React.FC<PostEditorProps> = ({ onClose, onSubmit, wallId, auth
   const [isRecording, setIsRecording] = useState(false);
   const [videoUrl, setVideoUrl] = useState<string | null>(null);
   const [videoThumbnail, setVideoThumbnail] = useState<string | null>(null);
+  const [countdown, setCountdown] = useState<number | null>(null);
+  /** A blob: URL for the recording just made — instant to scrub, no round trip. */
+  const [localVideoUrl, setLocalVideoUrl] = useState<string | null>(null);
+  const [frameOptions, setFrameOptions] = useState<{ time: number; dataUrl: string }[]>([]);
+  const [selectedFrame, setSelectedFrame] = useState<{ time: number; dataUrl: string } | null>(null);
+  const [isExtractingFrames, setIsExtractingFrames] = useState(false);
   const [isFetchingLink, setIsFetchingLink] = useState(false);
   const [linkMetadata, setLinkMetadata] = useState<any>(null);
   const [isCheckingSafety, setIsCheckingSafety] = useState(false);
@@ -64,6 +70,10 @@ const PostEditor: React.FC<PostEditorProps> = ({ onClose, onSubmit, wallId, auth
   const videoRef = useRef<HTMLVideoElement>(null);
   const previewVideoRef = useRef<HTMLVideoElement>(null);
   const mediaRecorderRef = useRef<MediaRecorder | null>(null);
+  const streamRef = useRef<MediaStream | null>(null);
+  const countdownTimer = useRef<number | null>(null);
+  /** The frame `videoThumbnail` was uploaded from, so a new pick re-uploads and a re-submit doesn't. */
+  const uploadedFrame = useRef<string | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const driveTokenClient = useRef<TokenClient | null>(null);
@@ -81,6 +91,7 @@ const PostEditor: React.FC<PostEditorProps> = ({ onClose, onSubmit, wallId, auth
       } else if (pType === 'video') {
          setVideoUrl(initialPost.content);
          setVideoThumbnail(initialPost.metadata?.videoThumbnail || null);
+         if (initialPost.content) extractFrames(initialPost.content);
       } else if (pType === 'image' || pType === 'gif') {
          setUrl(initialPost.content);
       } else {
@@ -212,39 +223,179 @@ const PostEditor: React.FC<PostEditorProps> = ({ onClose, onSubmit, wallId, auth
     } finally { setIsFetchingLink(false); }
   };
 
+  /* ---------- video: countdown, record, pick a thumbnail ---------- */
+
+  /** The frame a video element is showing right now, as a small JPEG. */
+  const captureFrame = (video: HTMLVideoElement, width = 480): string => {
+    const w = video.videoWidth || width;
+    const h = video.videoHeight || Math.round(width * 9 / 16);
+    const canvas = document.createElement('canvas');
+    canvas.width = width;
+    canvas.height = Math.round(h * (width / w));
+    canvas.getContext('2d')!.drawImage(video, 0, 0, canvas.width, canvas.height);
+    return canvas.toDataURL('image/jpeg', 0.82);
+  };
+
+  /** Seek and wait for the frame to be there. Never hangs: a seek that goes nowhere resolves anyway. */
+  const seekTo = (video: HTMLVideoElement, t: number) => new Promise<void>((resolve) => {
+    if (Math.abs(video.currentTime - t) < 0.01 && video.readyState >= 2) return resolve();
+    const timer = window.setTimeout(done, 2000);
+    function done() { window.clearTimeout(timer); video.removeEventListener('seeked', done); resolve(); }
+    video.addEventListener('seeked', done);
+    video.currentTime = t;
+  });
+
+  /**
+   * How long the video is.
+   *
+   * A recording straight out of MediaRecorder reports Infinity until the
+   * browser has been made to look at the end of it — so if that's what we get,
+   * seek past the end once, let it find the real length, and seek back.
+   */
+  const loadDuration = (video: HTMLVideoElement) => new Promise<number>((resolve) => {
+    const finish = () => resolve(Number.isFinite(video.duration) ? video.duration : 0);
+    const probe = () => {
+      if (Number.isFinite(video.duration) && video.duration > 0) return finish();
+      const onTime = () => { video.removeEventListener('timeupdate', onTime); video.currentTime = 0; finish(); };
+      video.addEventListener('timeupdate', onTime);
+      video.currentTime = 1e101;
+    };
+    if (video.readyState >= 1) probe();
+    else video.addEventListener('loadedmetadata', probe, { once: true });
+    video.addEventListener('error', () => resolve(0), { once: true });
+  });
+
+  /** Six frames spread across the recording, to pick a poster from. */
+  const extractFrames = async (src: string, count = 6) => {
+    setIsExtractingFrames(true);
+    try {
+      const video = document.createElement('video');
+      video.muted = true;
+      video.playsInline = true;
+      video.preload = 'auto';
+      video.src = src;
+      const duration = await loadDuration(video);
+      const frames: { time: number; dataUrl: string }[] = [];
+      const steps = duration > 0 ? count : 1;
+      for (let i = 0; i < steps; i++) {
+        // Midpoints of equal slices, so the first frame isn't the black one the
+        // camera opened on and the last isn't the hand reaching for Stop.
+        const t = duration > 0 ? Math.min((duration * (i + 0.5)) / count, Math.max(duration - 0.1, 0)) : 0;
+        await seekTo(video, t);
+        frames.push({ time: t, dataUrl: captureFrame(video) });
+      }
+      setFrameOptions(frames);
+      // A fresh recording gets a poster by default; an existing post keeps its
+      // own thumbnail until a frame is actually picked.
+      if (!videoThumbnail) setSelectedFrame((prev) => prev ?? frames[0] ?? null);
+    } catch (err) {
+      console.warn('Could not pull frames from the recording:', err);
+    } finally {
+      setIsExtractingFrames(false);
+    }
+  };
+
+  /** Whatever the preview is paused on becomes a candidate — and the choice. */
+  const useCurrentFrame = () => {
+    const video = previewVideoRef.current;
+    if (!video || video.readyState < 2) return;
+    const frame = { time: video.currentTime, dataUrl: captureFrame(video) };
+    setFrameOptions((prev) => [...prev.filter((f) => Math.abs(f.time - frame.time) > 0.05), frame].sort((a, b) => a.time - b.time));
+    setSelectedFrame(frame);
+  };
+
+  const beginRecording = (stream: MediaStream) => {
+    const recorder = new MediaRecorder(stream);
+    mediaRecorderRef.current = recorder;
+    const chunks: Blob[] = [];
+    recorder.ondataavailable = (e) => chunks.push(e.data);
+    recorder.onstop = async () => {
+      stream.getTracks().forEach(t => t.stop());
+      streamRef.current = null;
+      // MediaRecorder labels its output by what it actually produced, which is
+      // usually webm — the old code asserted mp4 regardless, and the server
+      // has to know the real type to store and serve it.
+      const blob = new Blob(chunks, { type: recorder.mimeType || 'video/webm' });
+
+      // Preview from the local bytes straight away; the upload can take its time.
+      const local = URL.createObjectURL(blob);
+      setLocalVideoUrl(local);
+      setVideoThumbnail(null);
+      setSelectedFrame(null);
+      setFrameOptions([]);
+      uploadedFrame.current = null;
+      extractFrames(local);
+
+      setIsUploading(true);
+      setUploadError(null);
+      try {
+        const { key, url: uploadedUrl } = await databaseService.uploadMedia(wallId, blob);
+        setUploadedMediaKey(key);
+        setVideoUrl(uploadedUrl);
+      } catch (err: any) {
+        setUploadError(err?.message ?? "That recording couldn't be uploaded.");
+      } finally {
+        setIsUploading(false);
+      }
+    };
+    recorder.start();
+    setIsRecording(true);
+  };
+
+  /**
+   * Record, after a three-second countdown.
+   *
+   * The camera is opened before the count, not after: the live preview is what
+   * lets someone get into frame, and the first second of a recording made the
+   * instant the camera opened was always the exposure settling.
+   */
   const startRecording = async () => {
+    setUploadError(null);
     try {
       const stream = await navigator.mediaDevices.getUserMedia({ video: true, audio: true });
+      streamRef.current = stream;
       if (videoRef.current) videoRef.current.srcObject = stream;
-      const recorder = new MediaRecorder(stream);
-      mediaRecorderRef.current = recorder;
-      const chunks: Blob[] = [];
-      recorder.ondataavailable = (e) => chunks.push(e.data);
-      recorder.onstop = async () => {
-        stream.getTracks().forEach(t => t.stop());
-        // MediaRecorder labels its output by what it actually produced, which is
-        // usually webm — the old code asserted mp4 regardless, and the server
-        // has to know the real type to store and serve it.
-        const blob = new Blob(chunks, { type: recorder.mimeType || 'video/webm' });
-        setIsUploading(true);
-        setUploadError(null);
-        try {
-          const { key, url: uploadedUrl } = await databaseService.uploadMedia(wallId, blob);
-          setUploadedMediaKey(key);
-          setVideoUrl(uploadedUrl);
-          setVideoThumbnail(null);
-        } catch (err: any) {
-          setUploadError(err?.message ?? "That recording couldn't be uploaded.");
-        } finally {
-          setIsUploading(false);
-        }
-      };
-      recorder.start();
-      setIsRecording(true);
-    } catch (err) { alert("Microphone/Camera access required"); }
+      let remaining = 3;
+      setCountdown(remaining);
+      countdownTimer.current = window.setInterval(() => {
+        remaining -= 1;
+        if (remaining > 0) { setCountdown(remaining); return; }
+        window.clearInterval(countdownTimer.current!);
+        countdownTimer.current = null;
+        setCountdown(null);
+        beginRecording(stream);
+      }, 1000);
+    } catch (err) {
+      setUploadError('Camera and microphone access is needed to record.');
+    }
+  };
+
+  const cancelCountdown = () => {
+    if (countdownTimer.current) window.clearInterval(countdownTimer.current);
+    countdownTimer.current = null;
+    setCountdown(null);
+    streamRef.current?.getTracks().forEach(t => t.stop());
+    streamRef.current = null;
   };
 
   const stopRecording = () => { mediaRecorderRef.current?.stop(); setIsRecording(false); };
+
+  const retake = () => {
+    if (localVideoUrl) URL.revokeObjectURL(localVideoUrl);
+    setLocalVideoUrl(null);
+    setVideoUrl(null);
+    setVideoThumbnail(null);
+    setFrameOptions([]);
+    setSelectedFrame(null);
+    setUploadedMediaKey(null);
+    uploadedFrame.current = null;
+  };
+
+  // Closing the editor mid-count or mid-recording must not leave the camera on.
+  useEffect(() => () => {
+    if (countdownTimer.current) window.clearInterval(countdownTimer.current);
+    streamRef.current?.getTracks().forEach(t => t.stop());
+  }, []);
 
   const handleSubmit = async () => {
     let submissionTitle = '';
@@ -254,7 +405,27 @@ const PostEditor: React.FC<PostEditorProps> = ({ onClose, onSubmit, wallId, auth
 
     if (type === 'video') {
       submissionContent = videoUrl || '';
-      submissionMetadata.videoThumbnail = videoThumbnail;
+      // The chosen frame goes to R2 as a JPEG and the post keeps its path —
+      // metadata is capped at a few KB, so pixels can't live there. Only
+      // uploaded when the pick has changed since the last upload.
+      let thumbnail = videoThumbnail;
+      if (selectedFrame && uploadedFrame.current !== selectedFrame.dataUrl) {
+        setIsUploading(true);
+        setUploadError(null);
+        try {
+          const blob = await (await fetch(selectedFrame.dataUrl)).blob();
+          const { url } = await databaseService.uploadMedia(wallId, blob);
+          thumbnail = url;
+          setVideoThumbnail(url);
+          uploadedFrame.current = selectedFrame.dataUrl;
+        } catch (err: any) {
+          setUploadError(err?.message ?? "The thumbnail couldn't be uploaded.");
+          return;
+        } finally {
+          setIsUploading(false);
+        }
+      }
+      submissionMetadata.videoThumbnail = thumbnail;
     } else if (type === 'image' || type === 'gif') {
       submissionContent = url;
     } else if (type === 'link' || type === 'drive') {
@@ -477,17 +648,67 @@ const PostEditor: React.FC<PostEditorProps> = ({ onClose, onSubmit, wallId, auth
               </div>
             )}
 
-            {type === 'video' && (
+            {type === 'video' && (() => {
+              const previewSrc = localVideoUrl ?? videoUrl;
+              const live = countdown !== null || isRecording;
+              return (
               <div className="space-y-4">
                 <div className="aspect-video bg-black rounded-2xl overflow-hidden relative shadow-inner">
-                  <video ref={videoRef} autoPlay muted playsInline className={`w-full h-full object-cover ${!isRecording && !videoUrl ? 'hidden' : ''}`} />
-                  {videoUrl && !isRecording && <video ref={previewVideoRef} src={videoUrl} className="w-full h-full object-cover absolute inset-0" />}
+                  <video ref={videoRef} autoPlay muted playsInline className={`w-full h-full object-cover ${live ? '' : 'hidden'}`} />
+                  {previewSrc && !live && (
+                    <video ref={previewVideoRef} src={previewSrc} controls playsInline preload="auto" className="w-full h-full object-contain absolute inset-0 bg-black" />
+                  )}
+                  {countdown !== null && (
+                    <div className="absolute inset-0 flex items-center justify-center bg-black/40">
+                      <span key={countdown} data-testid="countdown" className="text-white text-8xl font-black drop-shadow-lg animate-pulse">{countdown}</span>
+                    </div>
+                  )}
+                  {isRecording && (
+                    <div data-testid="rec-badge" className="absolute top-3 left-3 flex items-center gap-2 bg-black/60 text-white text-[10px] font-black tracking-widest px-3 py-1.5 rounded-full">
+                      <span className="h-2 w-2 rounded-full bg-red-500 animate-pulse" /> REC
+                    </div>
+                  )}
+                  {!previewSrc && !live && (
+                    <div className="absolute inset-0 flex items-center justify-center text-white/50 text-xs font-bold">Your camera will appear here</div>
+                  )}
                 </div>
                 <div className="flex justify-center gap-4">
-                  {!isRecording ? <button onClick={startRecording} className="px-8 py-3 bg-red-600 text-white rounded-full font-bold">Record</button> : <button onClick={stopRecording} className="px-8 py-3 bg-slate-800 text-white rounded-full font-bold">Stop</button>}
+                  {countdown !== null ? (
+                    <button onClick={cancelCountdown} className="px-8 py-3 bg-slate-200 text-slate-700 rounded-full font-bold">Cancel</button>
+                  ) : isRecording ? (
+                    <button onClick={stopRecording} className="px-8 py-3 bg-slate-800 text-white rounded-full font-bold">Stop</button>
+                  ) : previewSrc ? (
+                    <button onClick={retake} className="px-8 py-3 bg-slate-200 text-slate-700 rounded-full font-bold">Retake</button>
+                  ) : (
+                    <button onClick={startRecording} className="px-8 py-3 bg-red-600 text-white rounded-full font-bold">Record</button>
+                  )}
                 </div>
+                {previewSrc && !live && (
+                  <div className="space-y-2" data-testid="thumbnail-picker">
+                    <label className="block text-xs font-black text-slate-400 uppercase tracking-widest">Thumbnail</label>
+                    {isExtractingFrames && frameOptions.length === 0 ? (
+                      <p className="text-xs font-bold text-slate-400 flex items-center gap-2"><Loader2 size={14} className="animate-spin" /> Pulling frames from the recording…</p>
+                    ) : (
+                      <div className="grid grid-cols-3 sm:grid-cols-6 gap-1.5">
+                        {frameOptions.map((f, i) => {
+                          const selected = selectedFrame?.dataUrl === f.dataUrl;
+                          return (
+                            <button key={`${f.time}-${i}`} data-testid="frame-option" onClick={() => setSelectedFrame(f)} title={`${f.time.toFixed(1)}s`} className={`h-14 w-full rounded-lg overflow-hidden border-2 transition-all ${selected ? 'border-cyan-600 ring-2 ring-cyan-500/30' : 'border-transparent hover:border-cyan-400'}`}>
+                              <img src={f.dataUrl} alt="" className="w-full h-full object-cover" />
+                            </button>
+                          );
+                        })}
+                      </div>
+                    )}
+                    <div className="flex items-center justify-between gap-3">
+                      <button onClick={useCurrentFrame} className="text-xs font-bold text-cyan-700 hover:text-cyan-900 underline underline-offset-2">Use the frame I'm paused on</button>
+                      {!selectedFrame && videoThumbnail && <span className="text-[10px] font-bold text-slate-400">Keeping the current thumbnail</span>}
+                    </div>
+                  </div>
+                )}
               </div>
-            )}
+              );
+            })()}
 
             {(type !== 'title' && !isKanbanColumn) && (
               <div className="pt-2">
