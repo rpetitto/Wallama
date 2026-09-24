@@ -61,6 +61,26 @@ const getVideoEmbedUrl = (url?: string) => {
   return null;
 };
 
+/**
+ * The words on a Kanban column's header.
+ *
+ * A column made in Kanban is a heading and always has them. One that arrived
+ * from a Timeline, where a milestone can be a picture or a link, might only
+ * have a URL — so fall back through the fields a person wrote before naming
+ * the kind of post it is.
+ */
+const COLUMN_TYPE_LABELS: Record<string, string> = {
+  image: 'Image', gif: 'GIF', video: 'Video', link: 'Link', drive: 'Drive file', ai: 'Note',
+};
+const columnLabel = (post: PostType): string => {
+  if (post.title?.trim()) return post.title;
+  if (post.type === 'title' || (post.type as string) === 'text' || post.type === 'ai') {
+    const plain = (post.content || '').replace(/[#*_>`~\[\]]/g, '').trim().split('\n')[0];
+    if (plain) return plain.length > 60 ? `${plain.slice(0, 57)}…` : plain;
+  }
+  return post.metadata?.title || post.metadata?.caption || COLUMN_TYPE_LABELS[post.type] || 'Untitled';
+};
+
 const Post: React.FC<PostProps> = ({ 
   post, onDelete, onEdit, onMove, onMoveEnd, onDragStart, onAddDetail, children, 
   isOwner, snapToGrid, isWallAnonymous, isWallFrozen, isTimelineMilestone, isKanbanColumn, isKanbanCard, zoom 
@@ -208,7 +228,7 @@ const Post: React.FC<PostProps> = ({
     if (isKanbanColumn) {
         return (
             <div className="text-center">
-                <h3 className="text-xs font-black text-slate-700 uppercase tracking-widest leading-none">{post.title || post.content}</h3>
+                <h3 className="text-xs font-black text-slate-700 uppercase tracking-widest leading-tight">{columnLabel(post)}</h3>
             </div>
         );
     }

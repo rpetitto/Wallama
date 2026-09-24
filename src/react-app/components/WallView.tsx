@@ -4,7 +4,14 @@ import { Wall, Post as PostType, UserRole, ClassroomCourse, WallType, User } fro
 import Post from './Post';
 import PostEditor from './PostEditor';
 import { ChevronLeft, Plus, Share2, Settings, X, Check, ZoomIn, ZoomOut, Maximize, Loader2, AlertCircle, LayoutGrid, Lock, Unlock, Image as ImageIcon, Copy, Search, School, Trash2, ShieldAlert, Upload, HardDrive, Link as LinkIcon, Grip, Layers, List, History, Kanban, Info, LogIn } from 'lucide-react';
-import { WALL_GRADIENTS } from '../constants';
+import { WALL_GRADIENTS, WALL_TYPE_OPTIONS } from '../constants';
+import {
+  TIMELINE_AXIS_Y,
+  MILESTONE_SPACING as MIN_MILESTONE_SPACING,
+  KANBAN_COLUMN_WIDTH,
+  KANBAN_START_X,
+  CARD_WIDTH,
+} from '../../shared/layout';
 import { authService, databaseService, searchService } from '../lib/api';
 import { classroomService } from '../lib/classroom';
 import { DRIVE_SCOPES, SIGN_IN_SCOPES, tokenClient, storeAccessToken, type TokenClient } from '../lib/google';
@@ -19,10 +26,119 @@ import EmojiPicker from 'emoji-picker-react';
 const isImageSource = (value?: string) =>
   !!value && (value.startsWith('http') || value.startsWith('/api/media/') || value.startsWith('data:'));
 
-const TIMELINE_AXIS_Y = 450; 
-const MIN_MILESTONE_SPACING = 340; // 300px card + 40px gap
-const KANBAN_COLUMN_WIDTH = 340;
-const KANBAN_START_X = 50;
+const layoutLabel = (t: WallType) => WALL_TYPE_OPTIONS.find(o => o.id === t)?.label ?? t;
+
+/**
+ * What switching layouts is about to do, in the settings dialog before Save.
+ *
+ * The rules themselves are in the Worker (src/worker/lib/layouts.ts); this only
+ * has to describe them. `returning` is whether the wall has been in the new
+ * layout before, in which case posts go back to their old spots there and only
+ * the ones added since need fitting in. The last sentence is the same promise
+ * about the layout being left.
+ */
+const layoutSwitchNote = (from: WallType, to: WallType, returning: boolean): string => {
+  const grouped = from === 'kanban' || from === 'timeline';
+  const group = from === 'kanban' ? 'column' : 'milestone';
+  const members = from === 'kanban' ? 'cards' : 'details';
+  let what: string;
+  if (returning && to === 'freeform') {
+    what = 'Posts go back to where they were the last time this wall was Freeform, and anything added since is placed below them.';
+  } else if (returning && to === 'kanban') {
+    what = from === 'timeline'
+      ? 'Posts go back to where they were the last time this wall was Kanban, and anything added since joins as a column or a card.'
+      : 'Posts go back to where they were the last time this wall was Kanban, and anything added since goes into an "Unsorted" column.';
+  } else if (returning && to === 'timeline') {
+    what = from === 'kanban'
+      ? 'Posts go back to where they were the last time this wall was a Timeline, and anything added since joins as a milestone or a detail.'
+      : 'Posts go back to where they were the last time this wall was a Timeline, and anything added since goes at the end of the line.';
+  } else if (to === 'kanban') {
+    what = from === 'timeline'
+      ? 'Milestones become columns, and their details become cards.'
+      : 'Posts go into an "Unsorted" column, ready to drag into columns you add.';
+  } else if (to === 'timeline') {
+    what = from === 'kanban'
+      ? 'Columns become milestones, and their cards become details.'
+      : 'Each post becomes a milestone, in the order they appear now.';
+  } else if (to === 'freeform') {
+    what = grouped
+      ? `Each ${group} becomes a stack on the canvas with its ${members} underneath.`
+      : 'Posts are laid out in a grid on the canvas.';
+  } else {
+    what = grouped
+      ? `Posts are listed by when they were made, and each ${group} heading shows as a post of its own.`
+      : 'Posts are listed by when they were made.';
+  }
+  const kept = from === 'freeform' || grouped
+    ? ` Your ${layoutLabel(from)} arrangement is saved, so switching back puts every post where it was.`
+    : '';
+  return what + kept;
+};
+
+/**
+ * The order each layout draws posts in. Used for every poll and for the wall
+ * that comes back from a change of layout, so both agree.
+ */
+const orderPosts = (type: WallType, posts: PostType[]): PostType[] => {
+  const sorted = [...posts];
+  if (type === 'timeline') {
+    sorted.sort((a, b) => {
+      if (a.parentId && b.parentId && a.parentId === b.parentId) return a.createdAt - b.createdAt;
+      if (!a.parentId && !b.parentId) return a.x - b.x;
+      return a.createdAt - b.createdAt;
+    });
+  } else if (type === 'kanban') {
+    sorted.sort((a, b) => {
+      if (!a.parentId && !b.parentId) return a.x - b.x; // Sort columns by X
+      if (a.parentId && b.parentId && a.parentId === b.parentId) return a.y - b.y; // Sort items by Y
+      return 0;
+    });
+  } else if (type === 'freeform') {
+    sorted.sort((a, b) => a.zIndex - b.zIndex);
+  } else {
+    sorted.sort((a, b) => a.createdAt - b.createdAt);
+  }
+  return sorted;
+};
+
+/**
+ * The canvas area a layout's posts occupy, for fitting them on screen.
+ *
+ * Each layout draws posts relative to a different anchor: a Freeform card hangs
+ * down from its x/y, a Timeline milestone sits above the line with its details
+ * below it, and a Kanban column starts at the top of the canvas whatever its y
+ * says. Using the Freeform rule for all three cut off the top half of every
+ * timeline, which mattered little until switching layouts started fitting the
+ * view to each new one.
+ */
+const contentBounds = (wall: Wall) => {
+  const roots = wall.posts.filter(p => !p.parentId);
+  const childCount = (id: string) => wall.posts.filter(p => p.parentId === id).length;
+  if (wall.type === 'timeline') {
+    const deepest = Math.max(0, ...roots.map(m => childCount(m.id)));
+    return {
+      minX: Math.min(...roots.map(m => m.x)) - CARD_WIDTH / 2,
+      maxX: Math.max(...roots.map(m => m.x)) + CARD_WIDTH / 2,
+      minY: TIMELINE_AXIS_Y - 320,
+      maxY: TIMELINE_AXIS_Y + 60 + deepest * 230,
+    };
+  }
+  if (wall.type === 'kanban') {
+    const tallest = Math.max(0, ...roots.map(c => childCount(c.id)));
+    return {
+      minX: Math.min(...roots.map(c => c.x)),
+      maxX: Math.max(...roots.map(c => c.x)) + KANBAN_COLUMN_WIDTH,
+      minY: 0,
+      maxY: 90 + tallest * 230,
+    };
+  }
+  return {
+    minX: Math.min(...wall.posts.map(p => p.x)),
+    maxX: Math.max(...wall.posts.map(p => p.x + CARD_WIDTH)),
+    minY: Math.min(...wall.posts.map(p => p.y)),
+    maxY: Math.max(...wall.posts.map(p => p.y + 250)),
+  };
+};
 
 interface WallViewProps {
   wallId: string;
@@ -50,6 +166,8 @@ const WallView: React.FC<WallViewProps> = ({
   const [isSyncing, setIsSyncing] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
+  const [isSavingSettings, setIsSavingSettings] = useState(false);
+  const [settingsError, setSettingsError] = useState<string | null>(null);
   
   const [settingsForm, setSettingsForm] = useState<Partial<Wall>>({});
   const [bgPickerTab, setBgPickerTab] = useState<'presets' | 'upload' | 'drive' | 'url' | 'search'>('presets');
@@ -80,7 +198,8 @@ const WallView: React.FC<WallViewProps> = ({
   const [zoom, setZoom] = useState(1);
   const [pan, setPan] = useState({ x: 0, y: 0 });
   const containerRef = useRef<HTMLDivElement>(null);
-  const hasInitialZoomed = useRef(false);
+  /** The layout the view was last fitted to. A new layout, from us or from a poll, gets fitted afresh. */
+  const fittedLayout = useRef<WallType | null>(null);
   const bgInputRef = useRef<HTMLInputElement>(null);
   
   const [draggingPostId, setDraggingPostId] = useState<string | null>(null);
@@ -194,6 +313,10 @@ const WallView: React.FC<WallViewProps> = ({
       // a second, for every person with the wall open.
       const { wall: remoteWall, unchanged } = await databaseService.getWall(wallId);
       if (unchanged) return;
+      // A poll that set off before a change of ours and landed after it is
+      // carrying the older wall — after a change of layout, the old layout.
+      // `rev` only ever goes up, so never step back to a lower one.
+      if (remoteWall?.rev && wallRef.current?.rev && remoteWall.rev < wallRef.current.rev) return;
       if (remoteWall) {
         const combinedPosts: PostType[] = [];
         const remoteIds = new Set(remoteWall.posts.map(p => p.id));
@@ -203,26 +326,16 @@ const WallView: React.FC<WallViewProps> = ({
         });
         optimisticPosts.current.forEach((op, id) => { if (!remoteIds.has(id)) combinedPosts.push(op); });
         
-        const currentType = remoteWall.type as string;
-        if (currentType === 'timeline') {
-           combinedPosts.sort((a, b) => {
-              if (a.parentId && b.parentId && a.parentId === b.parentId) return a.createdAt - b.createdAt;
-              if (!a.parentId && !b.parentId) return a.x - b.x;
-              return a.createdAt - b.createdAt;
-           });
-        } else if (currentType === 'kanban') {
-           combinedPosts.sort((a, b) => {
-               if (!a.parentId && !b.parentId) return a.x - b.x; // Sort columns by X
-               if (a.parentId && b.parentId && a.parentId === b.parentId) return a.y - b.y; // Sort items by Y
-               return 0;
-           });
-        } else if (currentType === 'freeform') {
-           combinedPosts.sort((a, b) => a.zIndex - b.zIndex);
-        } else {
-           combinedPosts.sort((a, b) => a.createdAt - b.createdAt);
+        // Someone else changed the layout. Anything held back from the poll
+        // was placed for the old one and would be drawn in the wrong spot.
+        if (wallRef.current && wallRef.current.type !== remoteWall.type) {
+          optimisticPosts.current.clear();
+          setWall({ ...remoteWall, posts: orderPosts(remoteWall.type, remoteWall.posts) });
+          setError(null);
+          return;
         }
-        
-        setWall({ ...remoteWall, posts: combinedPosts });
+
+        setWall({ ...remoteWall, posts: orderPosts(remoteWall.type, combinedPosts) });
         setError(null);
       } else { 
         if (!wallRef.current) {
@@ -235,14 +348,15 @@ const WallView: React.FC<WallViewProps> = ({
   const zoomFit = useCallback(() => {
     if (!wall || wall.posts.length === 0 || !isCanvasMode) { setZoom(1); setPan({ x: 0, y: 0 }); return; }
     const padding = 100;
-    const minX = Math.min(...wall.posts.map(p => p.x));
-    const maxX = Math.max(...wall.posts.map(p => p.x + 300));
-    const minY = Math.min(...wall.posts.map(p => p.y));
-    const maxY = Math.max(...wall.posts.map(p => p.y + 250));
+    const { minX, maxX, minY, maxY } = contentBounds(wall);
     const contentWidth = maxX - minX;
     const contentHeight = maxY - minY;
-    const containerWidth = containerRef.current?.clientWidth || window.innerWidth;
-    const containerHeight = containerRef.current?.clientHeight || window.innerHeight;
+    // The canvas, not the page: pan is measured from the canvas's top-left,
+    // which sits below the header, so fitting to the whole page left
+    // everything a header's height too low.
+    const viewport = canvasRef.current ?? containerRef.current;
+    const containerWidth = viewport?.clientWidth || window.innerWidth;
+    const containerHeight = viewport?.clientHeight || window.innerHeight;
     if (contentWidth <= 0 || contentHeight <= 0) return;
     const scaleX = (containerWidth - padding) / contentWidth;
     const scaleY = (containerHeight - padding) / contentHeight;
@@ -255,9 +369,11 @@ const WallView: React.FC<WallViewProps> = ({
   }, [wall, isCanvasMode]);
 
   useEffect(() => {
-    if (wall && wall.posts.length > 0 && isCanvasMode && !hasInitialZoomed.current) {
-        setTimeout(() => { zoomFit(); hasInitialZoomed.current = true; }, 100);
-    }
+    if (!wall || fittedLayout.current === wall.type) return;
+    if (!isCanvasMode) { fittedLayout.current = wall.type; return; }
+    if (wall.posts.length === 0) return; // nothing to fit until the first post arrives
+    fittedLayout.current = wall.type;
+    setTimeout(zoomFit, 100);
   }, [wall, zoomFit, isCanvasMode]);
 
   useEffect(() => {
@@ -661,8 +777,41 @@ const WallView: React.FC<WallViewProps> = ({
   };
 
   const handleEditClick = (postId: string) => { if (wall?.isFrozen) return; setEditingPostId(postId); setShowEditor(true); };
-  const handleOpenSettings = () => { if (wall) setSettingsForm({ ...wall }); setShowSettings(true); setShowEmojiPicker(false); setBgSearch(''); };
-  const handleSaveSettings = () => { lastInteractionTime.current = Date.now() + 10000; onUpdateWall(settingsForm); if (wall) setWall({ ...wall, ...settingsForm }); setShowSettings(false); };
+  const handleOpenSettings = () => { if (wall) setSettingsForm({ ...wall }); setShowSettings(true); setShowEmojiPicker(false); setBgSearch(''); setSettingsError(null); };
+  const handleSaveSettings = async () => {
+    if (!wall) return;
+    // The form started as a copy of the whole wall. Its posts are a snapshot
+    // from when the dialog opened, so they are neither sent nor merged back —
+    // doing so dropped any post added while the dialog was open.
+    const { posts: _snapshot, ...updates } = settingsForm;
+
+    if (!updates.type || updates.type === wall.type) {
+      lastInteractionTime.current = Date.now() + 10000;
+      onUpdateWall(updates);
+      setWall(prev => prev ? { ...prev, ...updates } : prev);
+      setShowSettings(false);
+      return;
+    }
+
+    // A new layout rearranges every post on the server, and the reply is the
+    // only place their new spots come from — so this one waits for it.
+    setIsSavingSettings(true);
+    setSettingsError(null);
+    lastInteractionTime.current = Date.now() + 60000;
+    try {
+      const saved = await databaseService.saveWall(wallId, updates);
+      optimisticTimers.current.forEach(clearTimeout);
+      optimisticTimers.current.clear();
+      optimisticPosts.current.clear();
+      setWall({ ...saved, posts: orderPosts(saved.type, saved.posts) });
+      setShowSettings(false);
+    } catch (err: any) {
+      setSettingsError(err?.message ?? "The layout couldn't be changed. Try again.");
+    } finally {
+      lastInteractionTime.current = Date.now();
+      setIsSavingSettings(false);
+    }
+  };
   
   const handleAddDetail = (parentId: string) => {
     setActiveParentId(parentId);
@@ -1040,6 +1189,40 @@ const WallView: React.FC<WallViewProps> = ({
               </section>
 
               <section className="space-y-4">
+                <h4 className="text-xs font-black text-slate-600 uppercase tracking-widest flex items-center gap-2"><Layers size={14} /> Layout</h4>
+                <div className="grid grid-cols-2 sm:grid-cols-3 gap-2" role="radiogroup" aria-label="Wall layout">
+                  {WALL_TYPE_OPTIONS.map(option => {
+                    const selected = (settingsForm.type ?? wall.type) === option.id;
+                    return (
+                      <button
+                        key={option.id}
+                        type="button"
+                        role="radio"
+                        aria-checked={selected}
+                        data-testid={`layout-${option.id}`}
+                        onClick={() => { setSettingsForm({ ...settingsForm, type: option.id }); setSettingsError(null); }}
+                        className={`p-3 rounded-2xl border-2 text-left flex items-center sm:items-start gap-3 transition-all ${selected ? 'border-cyan-600 bg-cyan-50 ring-2 ring-cyan-500/10' : 'border-slate-100 bg-white hover:border-slate-200'}`}
+                      >
+                        <div className={`h-9 w-9 rounded-xl flex items-center justify-center shrink-0 ${selected ? 'bg-cyan-600 text-white' : 'bg-slate-100 text-slate-500'}`}><option.icon size={18} /></div>
+                        <div className="min-w-0">
+                          <p className={`text-sm font-bold leading-tight ${selected ? 'text-cyan-900' : 'text-slate-800'}`}>{option.label}</p>
+                          {option.id === wall.type
+                            ? <p className="text-[10px] font-black uppercase tracking-widest text-slate-400 mt-0.5">Current</p>
+                            : <p className={`hidden sm:block text-[11px] leading-snug mt-0.5 ${selected ? 'text-cyan-700' : 'text-slate-500'}`}>{option.desc}</p>}
+                        </div>
+                      </button>
+                    );
+                  })}
+                </div>
+                {settingsForm.type && settingsForm.type !== wall.type && (
+                  <div className="flex gap-3 p-4 rounded-2xl bg-cyan-50 border border-cyan-100" data-testid="layout-switch-note">
+                    <Info size={18} className="shrink-0 mt-0.5 text-cyan-600" />
+                    <p className="text-sm text-cyan-900 leading-relaxed">{layoutSwitchNote(wall.type, settingsForm.type, !!wall.rememberedLayouts?.includes(settingsForm.type))}</p>
+                  </div>
+                )}
+              </section>
+
+              <section className="space-y-4">
                 <h4 className="text-xs font-black text-slate-600 uppercase tracking-widest flex items-center gap-2"><LayoutGrid size={14} /> Background</h4>
                 
                 <div className="grid grid-cols-5 gap-1 sm:gap-2 p-1 bg-slate-100 rounded-xl">
@@ -1169,9 +1352,13 @@ const WallView: React.FC<WallViewProps> = ({
 
               <section className="pt-6 border-t border-red-50"><button onClick={() => setShowDeleteConfirm(true)} className="w-full p-4 bg-red-50 text-red-600 rounded-2xl font-bold flex items-center justify-center gap-2 hover:bg-red-100 transition-colors"><Trash2 size={20} /> Delete Wall</button></section>
             </div>
-            <div className="p-4 sm:p-6 pb-[calc(env(safe-area-inset-bottom)_+_1rem)] sm:pb-6 border-t border-slate-100 bg-slate-50 flex justify-end gap-3">
-              <button onClick={() => setShowSettings(false)} className="px-6 py-3 text-slate-500 font-bold hover:text-slate-700">Cancel</button>
-              <button onClick={handleSaveSettings} className="px-8 py-3 bg-cyan-600 text-white font-bold rounded-xl shadow-lg hover:bg-cyan-700 transition-colors">Save Changes</button>
+            <div className="p-4 sm:p-6 pb-[calc(env(safe-area-inset-bottom)_+_1rem)] sm:pb-6 border-t border-slate-100 bg-slate-50 flex flex-wrap items-center justify-end gap-3">
+              {settingsError && <p role="alert" className="w-full sm:w-auto sm:flex-1 text-sm font-bold text-red-600 flex items-center gap-2"><AlertCircle size={16} className="shrink-0" />{settingsError}</p>}
+              <button onClick={() => setShowSettings(false)} disabled={isSavingSettings} className="px-6 py-3 text-slate-500 font-bold hover:text-slate-700 disabled:opacity-50">Cancel</button>
+              <button onClick={handleSaveSettings} disabled={isSavingSettings} data-testid="save-settings" className="px-8 py-3 bg-cyan-600 text-white font-bold rounded-xl shadow-lg hover:bg-cyan-700 transition-colors disabled:opacity-70 flex items-center gap-2">
+                {isSavingSettings && <Loader2 size={18} className="animate-spin" />}
+                {isSavingSettings ? 'Rearranging…' : 'Save Changes'}
+              </button>
             </div>
           </div>
         </div>

@@ -1,3 +1,14 @@
+import { Grip, History, Kanban, Layers, List, type LucideIcon } from 'lucide-react';
+import type { WallType } from './types';
+
+/** The five layouts, as the create dialog and the wall settings both offer them. */
+export const WALL_TYPE_OPTIONS: { id: WallType; label: string; desc: string; icon: LucideIcon }[] = [
+  { id: 'freeform', label: 'Freeform', desc: 'Drag and drop posts anywhere on a canvas.', icon: Grip },
+  { id: 'wall', label: 'Wall', desc: 'A compact grid where posts automatically fit.', icon: Layers },
+  { id: 'stream', label: 'Stream', desc: 'Posts appear in a single vertical chronological list.', icon: List },
+  { id: 'timeline', label: 'Timeline', desc: 'Milestones on a horizontal line with stacked details.', icon: History },
+  { id: 'kanban', label: 'Kanban', desc: 'Columns for categories with draggable cards.', icon: Kanban }
+];
 
 export const WALL_COLORS = [
   '#FFFFFF', // Neutral White (Default)

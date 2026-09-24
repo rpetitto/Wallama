@@ -13,6 +13,7 @@ any more. The AI features run on Claude (`src/worker/routes/ai.ts`).
 src/worker/            the API (Hono) and the platform layer over Cloudflare bindings
 src/worker/platform/   db, storage, migrations — the seam over the bindings
 src/worker/routes/     auth, walls, posts, media, ai, search, status
+src/shared/            layout geometry the Worker and the SPA both use
 src/react-app/         the SPA
 public/                static files served from the edge
 ```
@@ -102,6 +103,17 @@ from a laptop means every deploy is the same deploy.
   a request body are ignored. Permission checks belong in
   `src/worker/lib/session.ts` next to the others, not in a component that hides
   a button.
+
+- **Layouts remember where posts were.** The owner can change a wall's layout
+  from Wall Settings. The Worker does the rearranging in one batch with the
+  type change (`src/worker/lib/layouts.ts`, pure and testable on its own). It
+  saves each post's spot in the layout being left to `posts.layouts` and puts
+  it back where it was in the layout being entered, fitting in any post that
+  was never there. Freeform, Kanban and Timeline are remembered; Wall and
+  Stream order by time and need nothing. `parentId` only exists in Kanban and
+  Timeline — it is cleared everywhere else, and the post routes refuse to set
+  it there — because deleting a post deletes its children, and on a Freeform
+  canvas nobody can see which cards those are.
 
 - **Anonymous walls are anonymous in the UI only.** The server sends real author
   names and `Post.tsx` hides them when the wall is set to anonymous — unchanged

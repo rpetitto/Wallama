@@ -184,6 +184,19 @@ export const databaseService = {
     }
   },
 
+  /**
+   * Save wall settings and get the wall back.
+   *
+   * Unlike `updateWall` this throws, and it's what the settings dialog uses:
+   * a change of layout rearranges every post on the server, and the reply
+   * carries them in their new places — the caller has nothing to draw until
+   * it arrives, so a failure has to be shown rather than swallowed.
+   */
+  async saveWall(wallId: string, updates: Partial<Wall>): Promise<Wall> {
+    const { wall } = await api.patch<{ wall: Wall }>(`/api/walls/${wallId}`, updates);
+    return wall;
+  },
+
   async deleteWall(wallId: string): Promise<boolean> {
     try {
       await api.del(`/api/walls/${wallId}`);

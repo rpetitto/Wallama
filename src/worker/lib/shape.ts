@@ -25,6 +25,8 @@ export interface PostRow {
   color: string;
   parent_id: string | null;
   metadata: string;
+  /** JSON: the post's remembered spot per layout. Server-side only — see lib/layouts.ts. */
+  layouts: string;
   created_at: string;
   updated_at: string;
 }
@@ -70,6 +72,17 @@ export function postShape(row: PostRow) {
 }
 
 export function wallShape(row: WallRow, posts: PostRow[] = []) {
+  // The layouts this wall has been in and its posts remember, so the settings
+  // dialog can say "posts go back to where they were" only when they will.
+  // The spots themselves stay on the server.
+  const remembered = new Set<string>();
+  for (const p of posts) {
+    try {
+      for (const key of Object.keys(JSON.parse(p.layouts || "{}"))) remembered.add(key);
+    } catch {
+      // An unreadable memory is just no memory.
+    }
+  }
   return {
     id: row.id,
     name: row.name || "Untitled Wall",
@@ -85,6 +98,7 @@ export function wallShape(row: WallRow, posts: PostRow[] = []) {
     icon: row.icon || "📝",
     requireLoginToPost: !!row.require_login_to_post,
     rev: row.rev,
+    rememberedLayouts: [...remembered],
     posts: posts.map(postShape),
   };
 }

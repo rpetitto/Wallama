@@ -20,6 +20,7 @@ import {
   param,
 } from "../lib/session";
 import { postShape, type PostRow } from "../lib/shape";
+import { HIERARCHICAL } from "../lib/layouts";
 
 const POST_TYPES = new Set(["title", "text", "image", "link", "gif", "video", "ai", "drive"]);
 
@@ -93,6 +94,11 @@ app.post(
       const parent = await postById(parentId);
       if (!parent || parent.wall_id !== wall.id) parentId = null;
     }
+    // Only Kanban and Timeline hang one post off another (see lib/layouts.ts).
+    // A client that hasn't noticed the wall changed layout doesn't get to
+    // re-attach a card on a Freeform canvas, where deleting its old column
+    // would silently take it too.
+    if (!HIERARCHICAL.has(wall.type)) parentId = null;
 
     await db
       .prepare(
@@ -158,6 +164,7 @@ app.patch(
         const parent = await postById(parentId);
         if (!parent || parent.wall_id !== wall.id || parent.id === post.id) parentId = null;
       }
+      if (!HIERARCHICAL.has(wall.type)) parentId = null;
       sets.push(`parent_id = ?`);
       values.push(parentId);
     }
@@ -202,6 +209,7 @@ app.patch(
         if (!parent || parent.wall_id !== wall.id || parent.id === post.id) parentId = null;
       }
     }
+    if (!HIERARCHICAL.has(wall.type)) parentId = null;
 
     await db
       .prepare(`UPDATE posts SET x = ?, y = ?, z_index = ?, parent_id = ?, updated_at = ? WHERE id = ?`)

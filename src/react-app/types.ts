@@ -70,6 +70,11 @@ export interface Wall {
    * what the polling ETag is built from — see databaseService.getWall.
    */
   rev?: number;
+  /**
+   * Layouts this wall has been in whose arrangement its posts remember.
+   * Switching to one of these puts posts back where they were.
+   */
+  rememberedLayouts?: WallType[];
 }
 
 export interface GiphyResult {

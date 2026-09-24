@@ -24,11 +24,14 @@ import {
   now,
   uid,
   param,
+  type AppUser,
   type WallRow,
 } from "../lib/session";
-import { wallShape, type PostRow } from "../lib/shape";
+import { epoch, wallShape, type PostRow } from "../lib/shape";
+import { HIERARCHICAL, rearrange, type LayoutPost } from "../lib/layouts";
+import { WALL_TYPES as WALL_TYPE_LIST } from "../../shared/layout";
 
-const WALL_TYPES = new Set(["freeform", "wall", "stream", "timeline", "kanban"]);
+const WALL_TYPES = new Set<string>(WALL_TYPE_LIST);
 const PRIVACY_TYPES = new Set(["public", "private", "link", "domain"]);
 
 /**
@@ -210,11 +213,103 @@ const WALL_FIELDS: Record<string, { column: string; encode: (v: any) => unknown 
   requireLoginToPost: { column: "require_login_to_post", encode: (v) => (v ? 1 : 0) },
 };
 
+/** A JSON column read back as an object, or an empty one if it won't parse. */
+function parseObject(text: string | null | undefined): Record<string, any> {
+  try {
+    const value = text ? JSON.parse(text) : {};
+    return value && typeof value === "object" && !Array.isArray(value) ? value : {};
+  } catch {
+    return {};
+  }
+}
+
+/**
+ * The statements that move every post on a wall into a new layout.
+ *
+ * lib/layouts.ts decides where each post goes and what to remember about where
+ * it was. This writes that down: at most one INSERT, for a Kanban column the
+ * switch had to create, and one UPDATE for every post at once. The UPDATE takes
+ * the placements as a single JSON parameter and joins against it, so a wall of
+ * three hundred posts is still two statements rather than three hundred.
+ */
+async function layoutSwitch(wall: WallRow, to: string, owner: AppUser): Promise<D1PreparedStatement[]> {
+  const rows = await postsFor(wall.id);
+  const posts: LayoutPost[] = rows.map((r) => ({
+    id: r.id,
+    type: r.type,
+    title: r.title,
+    content: r.content ?? "",
+    metadata: parseObject(r.metadata),
+    createdAt: epoch(r.created_at),
+    x: Number(r.x) || 0,
+    y: Number(r.y) || 0,
+    parentId: r.parent_id,
+    layouts: parseObject(r.layouts),
+  }));
+
+  const { placements, newColumn } = rearrange(wall.type, to, posts, uid);
+  const stamp = now();
+  const statements: D1PreparedStatement[] = [];
+
+  if (newColumn) {
+    const topZ = rows.reduce((z, r) => Math.max(z, Number(r.z_index) || 0), 0);
+    statements.push(
+      db
+        .prepare(
+          `INSERT INTO posts (id, wall_id, type, title, content, author_id, author_name, author_avatar,
+                              x, y, z_index, color, parent_id, metadata, layouts, created_at, updated_at)
+           VALUES (?, ?, 'title', ?, '', ?, ?, ?, ?, ?, ?, '#FFFFFF', NULL, '{}', '{}', ?, ?)`,
+        )
+        .bind(newColumn.id, wall.id, newColumn.title, owner.id, owner.name, owner.avatar ?? null,
+              newColumn.x, newColumn.y, topZ + 1, stamp, stamp),
+    );
+  }
+
+  if (placements.length > 0) {
+    const payload = placements.map((p) => ({
+      id: p.id,
+      x: Math.round(p.x),
+      y: Math.round(p.y),
+      parentId: p.parentId,
+      layouts: JSON.stringify(p.layouts),
+    }));
+    statements.push(
+      db
+        .prepare(
+          `UPDATE posts
+              SET x = json_extract(p.value, '$.x'),
+                  y = json_extract(p.value, '$.y'),
+                  parent_id = json_extract(p.value, '$.parentId'),
+                  layouts = json_extract(p.value, '$.layouts'),
+                  updated_at = ?
+             FROM json_each(?) AS p
+            WHERE posts.id = json_extract(p.value, '$.id') AND posts.wall_id = ?`,
+        )
+        .bind(stamp, JSON.stringify(payload), wall.id),
+    );
+  }
+
+  // The placements cover the posts that existed when they were read. One added
+  // in the moment since would keep its parent on a canvas that has no columns,
+  // so for a flat layout the batch clears every parent on the wall regardless.
+  if (!HIERARCHICAL.has(to)) {
+    statements.push(db.prepare(`UPDATE posts SET parent_id = NULL WHERE wall_id = ? AND parent_id IS NOT NULL`).bind(wall.id));
+  }
+
+  return statements;
+}
+
 app.patch(
   "/api/walls/:id",
   handler(async (c) => {
-    const { wall } = await requireWallOwner(c, param(c, "id"));
+    const { wall, user } = await requireWallOwner(c, param(c, "id"));
     const body = await c.req.json<Record<string, any>>();
+
+    // Other fields are coerced to something safe, but a layout name that isn't
+    // one would quietly turn a Kanban board into a Freeform canvas.
+    if (body.type !== undefined && !WALL_TYPES.has(body.type)) {
+      throw new HttpError(400, `There's no layout called "${String(body.type)}".`);
+    }
 
     const sets: string[] = [];
     const values: unknown[] = [];
@@ -226,16 +321,24 @@ app.patch(
     }
     if (sets.length === 0) return c.json({ wall: wallShape(wall) });
 
-    // The rev bump rides along with the update rather than following it, so a
-    // poll can never land between the two and cache the old wall under the new
-    // revision.
-    await db
-      .prepare(`UPDATE walls SET ${sets.join(", ")}, rev = rev + 1, updated_at = ? WHERE id = ?`)
-      .bind(...values, now(), wall.id)
-      .run();
+    // A new layout moves every post. The moves and the new type go in the same
+    // batch, which D1 runs as one transaction, so a poll can never see Kanban
+    // drawn with Freeform's positions. The rev bump rides along with the update
+    // rather than following it, so a poll can't cache the old wall under the
+    // new revision either.
+    const switching = body.type !== undefined && body.type !== wall.type;
+    const statements = switching ? await layoutSwitch(wall, body.type, user) : [];
+    statements.push(
+      db
+        .prepare(`UPDATE walls SET ${sets.join(", ")}, rev = rev + 1, updated_at = ? WHERE id = ?`)
+        .bind(...values, now(), wall.id),
+    );
+    await db.batch(statements);
 
+    // After a switch the posts are the point: the caller can't draw the new
+    // layout without them.
     const updated = await db.prepare(`SELECT * FROM walls WHERE id = ?`).bind(wall.id).first<WallRow>();
-    return c.json({ wall: wallShape(updated!) });
+    return c.json({ wall: wallShape(updated!, switching ? await postsFor(wall.id) : []) });
   }),
 );
 

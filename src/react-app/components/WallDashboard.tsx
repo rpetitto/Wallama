@@ -4,6 +4,7 @@ import { User, Wall, WallType } from '../types';
 import { Plus, LogOut, ArrowRight, Layout, Users, Calendar, X, Loader2, BookOpen, Layers, Grip, List, ChevronRight, Check, History, MoreVertical, Share2, Lock, Unlock, Trash2, Copy, ShieldAlert, Kanban } from 'lucide-react';
 import { LlamaLogo } from './LlamaLogo';
 import { aiService } from "../lib/api";
+import { WALL_TYPE_OPTIONS } from "../constants";
 import EmojiPicker from 'emoji-picker-react';
 
 interface WallDashboardProps {
@@ -52,13 +53,7 @@ const WallDashboard: React.FC<WallDashboardProps> = ({
   const isTeacher = user.role === 'teacher';
   const sectionTitle = isTeacher ? 'My Created Walls' : 'My Joined Walls';
 
-  const wallTypes: { id: WallType; label: string; desc: string; icon: any }[] = [
-    { id: 'freeform', label: 'Freeform', desc: 'Drag and drop posts anywhere on a canvas.', icon: Grip },
-    { id: 'wall', label: 'Wall', desc: 'A compact grid where posts automatically fit.', icon: Layers },
-    { id: 'stream', label: 'Stream', desc: 'Posts appear in a single vertical chronological list.', icon: List },
-    { id: 'timeline', label: 'Timeline', desc: 'Milestones on a horizontal line with stacked details.', icon: History },
-    { id: 'kanban', label: 'Kanban', desc: 'Columns for categories with draggable cards.', icon: Kanban }
-  ];
+  const wallTypes = WALL_TYPE_OPTIONS;
 
   // The Gemini key used to be compiled into this bundle, so anyone who opened
   // devtools could read it and spend it. The Worker holds it now.

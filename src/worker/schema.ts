@@ -117,3 +117,18 @@ migrate("001_core", async () => {
   `).run();
   await db.prepare(`CREATE INDEX IF NOT EXISTS idx_media_wall ON media(wall_id)`).run();
 });
+
+/**
+ * Where each post sat in each layout its wall has been in.
+ *
+ * Switching a wall from Freeform to Kanban rewrites every post's x, y and
+ * parent. Without somewhere to keep the old values, switching back would have
+ * to invent a new arrangement and whatever the teacher had built by hand would
+ * be gone. See lib/layouts.ts.
+ */
+migrate("002_post_layouts", async () => {
+  const columns = await db.prepare(`PRAGMA table_info(posts)`).all<{ name: string }>();
+  if (!(columns.results ?? []).some((c) => c.name === "layouts")) {
+    await db.prepare(`ALTER TABLE posts ADD COLUMN layouts TEXT NOT NULL DEFAULT '{}'`).run();
+  }
+});
