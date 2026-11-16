@@ -9,6 +9,7 @@
  */
 
 import type { Post, User, Wall } from "../types";
+import type { RoleCheck } from "../../shared/roleCheck";
 
 export class ApiError extends Error {
   /** Whatever the server attached under `detail` — an upstream status, say. */
@@ -75,11 +76,11 @@ export const authService = {
    * if a plain sign-in button is ever added. Either way the access token goes
    * along so the server can ask Classroom whether this person teaches anything
    * — the role decides who may create and delete walls, so it can't be the
-   * browser's answer to give.
+   * browser's answer to give. `roleCheck` says how that went, so the sign-in
+   * screen can explain a student result that might be a teacher's.
    */
-  async signInWithGoogle(proof: { credential?: string; accessToken?: string }): Promise<User> {
-    const { user } = await api.post<{ user: User }>("/api/auth/google", proof);
-    return user;
+  async signInWithGoogle(proof: { credential?: string; accessToken?: string }): Promise<{ user: User; roleCheck?: RoleCheck }> {
+    return await api.post<{ user: User; roleCheck?: RoleCheck }>("/api/auth/google", proof);
   },
 
   async signInAsGuest(): Promise<User> {

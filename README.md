@@ -124,7 +124,10 @@ from a laptop means every deploy is the same deploy.
   OAuth token, so this Worker holds no Google API credentials and a student is
   never asked for Classroom scopes. Sign-in is the one exception: the token is
   passed to the Worker once, used to ask Classroom whether this person teaches
-  anything, and not stored.
+  anything, and not stored. When the answer is "student" for a reason that
+  might be wrong — an account with no classes at all, an unticked permission, a
+  school admin blocking the Classroom API — the sign-in screen stops and says
+  which (`src/worker/lib/role.ts`), and the Worker logs it by user id.
 
 - **The canvas owns its touch gestures.** Three things together stop a downward
   drag on a phone from becoming the browser's pull-to-refresh:

@@ -258,7 +258,7 @@ const WallView: React.FC<WallViewProps> = ({
   const handleLoginResponse = async (accessToken: string) => {
       setIsLoggingIn(true);
       try {
-          const user = await authService.signInWithGoogle({ accessToken });
+          const { user } = await authService.signInWithGoogle({ accessToken });
           onLogin(user, accessToken);
       } catch (error) {
           console.error(error);

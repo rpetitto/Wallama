@@ -34,6 +34,7 @@ import {
   uid,
   type AppUser,
 } from "../lib/session";
+import { checkRole } from "../lib/role";
 
 interface GoogleClaims {
   iss: string;
@@ -44,6 +45,8 @@ interface GoogleClaims {
   email_verified?: boolean | string;
   name?: string;
   picture?: string;
+  /** Space-separated scopes the person actually granted. Access tokens only. */
+  scope?: string;
 }
 
 const GOOGLE_ISSUERS = ["accounts.google.com", "https://accounts.google.com"];
@@ -114,6 +117,7 @@ async function verifyGoogleAccessToken(token: string, clientId: string): Promise
     exp?: string;
     email?: string;
     email_verified?: string;
+    scope?: string;
   };
 
   if (info.aud !== clientId) throw new HttpError(401, "That Google sign-in was issued for a different app.");
@@ -145,34 +149,10 @@ async function verifyGoogleAccessToken(token: string, clientId: string): Promise
     email_verified: info.email_verified !== "false",
     name: profile.name,
     picture: profile.picture,
+    // Left undefined if Google ever omits it, so the role check asks Classroom
+    // rather than assume the permission was refused.
+    scope: info.scope,
   };
-}
-
-/**
- * Teacher or student?
- *
- * Wallama has always answered this by asking Google Classroom whether you teach
- * anything, and that is still the right question — it just can't be the
- * browser's answer to give, since the role decides who may create and delete
- * walls. The client passes along the access token it already holds for
- * Classroom, and the Worker makes the call itself. The token is used for this
- * one request and never stored.
- *
- * Anything other than a clear yes means student: a refused scope or a Classroom
- * outage should not hand out teacher rights.
- */
-async function looksLikeTeacher(accessToken: string | undefined): Promise<boolean> {
-  if (!accessToken) return false;
-  try {
-    const res = await fetch("https://classroom.googleapis.com/v1/courses?teacherId=me&courseStates=ACTIVE&pageSize=1", {
-      headers: { Authorization: `Bearer ${accessToken}` },
-    });
-    if (!res.ok) return false;
-    const data = (await res.json()) as { courses?: unknown[] };
-    return Array.isArray(data.courses) && data.courses.length > 0;
-  } catch {
-    return false;
-  }
 }
 
 app.post(
@@ -196,8 +176,9 @@ app.post(
       .first<AppUser>();
 
     // Re-checked on every sign-in rather than fixed at first sight: someone who
-    // was a student last September may be teaching this one.
-    const role = (await looksLikeTeacher(accessToken)) ? "teacher" : "student";
+    // was a student last September may be teaching this one. See lib/role.ts.
+    const roleCheck = await checkRole(accessToken, claims.scope);
+    const role = roleCheck.result === "teacher" ? "teacher" : "student";
 
     let user: AppUser;
     if (existing) {
@@ -218,8 +199,14 @@ app.post(
       user = { id, google_sub: claims.sub, email, name, avatar: claims.picture ?? null, role, is_guest: 0 };
     }
 
+    // The reason goes to the person on the sign-in screen, and to the Worker's
+    // log so it can be looked up later. The log names the account by id only.
+    if (roleCheck.result === "no_classes" || roleCheck.result === "unchecked") {
+      console.warn("Signed in as a student:", JSON.stringify({ user: user.id, ...roleCheck }));
+    }
+
     await startSession(c, user.id);
-    return c.json({ user: publicUser(user) });
+    return c.json({ user: publicUser(user), roleCheck });
   }),
 );
 
