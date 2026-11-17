@@ -1,5 +1,5 @@
 
-import React, { useState, useEffect, useCallback, useRef } from 'react';
+import React, { useState, useEffect, useLayoutEffect, useCallback, useRef } from 'react';
 import { Wall, Post as PostType, UserRole, ClassroomCourse, WallType, User } from '../types';
 import Post from './Post';
 import PostEditor from './PostEditor';
@@ -13,6 +13,7 @@ import {
   CARD_WIDTH,
 } from '../../shared/layout';
 import { authService, databaseService, searchService } from '../lib/api';
+import { classifyWheel, wheelClicks, type WheelDevice } from '../lib/wheel';
 import { classroomService } from '../lib/classroom';
 import { DRIVE_SCOPES, SIGN_IN_SCOPES, tokenClient, storeAccessToken, type TokenClient } from '../lib/google';
 import EmojiPicker from 'emoji-picker-react';
@@ -140,6 +141,14 @@ const contentBounds = (wall: Wall) => {
   };
 };
 
+const MIN_ZOOM = 0.05;
+const MAX_ZOOM = 5;
+const clampZoom = (z: number) => Math.min(Math.max(z, MIN_ZOOM), MAX_ZOOM);
+/** One click of a mouse wheel zooms by this factor, in or out. */
+const WHEEL_ZOOM_STEP = 1.15;
+/** A pause this long between wheel events ends one scroll gesture. */
+const WHEEL_GESTURE_GAP_MS = 300;
+
 interface WallViewProps {
   wallId: string;
   onBack: () => void;
@@ -208,8 +217,13 @@ const WallView: React.FC<WallViewProps> = ({
   const panRef = useRef(pan);
   const wallRef = useRef<Wall | null>(null);
 
-  useEffect(() => { zoomRef.current = zoom; }, [zoom]);
-  useEffect(() => { panRef.current = pan; }, [pan]);
+  // Layout effects, not plain ones. Wheel and touch handlers update these refs
+  // and the state together, many times a second. A plain effect runs a frame
+  // later, after the next event may already have moved the ref on, and then
+  // put it back to the older state value — dropping that event's movement,
+  // which made trackpad panning stutter and fast wheel zooms skip steps.
+  useLayoutEffect(() => { zoomRef.current = zoom; }, [zoom]);
+  useLayoutEffect(() => { panRef.current = pan; }, [pan]);
   useEffect(() => { wallRef.current = wall; }, [wall]);
   
   const optimisticPosts = useRef<Map<string, PostType>>(new Map());
@@ -484,9 +498,13 @@ const WallView: React.FC<WallViewProps> = ({
     };
   }, [isCanvasMode, isInteractionBlocked]);
 
+  // Zoom keeps the point under the cursor (or between two fingers) still. Pan
+  // is measured from the canvas's top-left corner, which sits below the
+  // header, so that is the corner to measure from: measuring from the page's
+  // made every zoom drift by the header's height.
   const performZoomAtPoint = (newZoom: number, screenX: number, screenY: number) => {
     if (!isCanvasMode) return;
-    const el = containerRef.current;
+    const el = canvasRef.current ?? containerRef.current;
     if (!el) return;
     const rect = el.getBoundingClientRect();
     const targetX = screenX - rect.left;
@@ -505,31 +523,67 @@ const WallView: React.FC<WallViewProps> = ({
 
   const handleManualZoom = (direction: 1 | -1) => {
     if (isInteractionBlocked || !isCanvasMode) return;
-    const el = containerRef.current;
+    const el = canvasRef.current ?? containerRef.current;
     if (!el) return;
     const rect = el.getBoundingClientRect();
     const centerX = rect.left + rect.width / 2;
     const centerY = rect.top + rect.height / 2;
-    const nextZoom = Math.min(Math.max(zoomRef.current + (direction * 0.15), 0.05), 5);
+    const nextZoom = clampZoom(zoomRef.current + (direction * 0.15));
     performZoomAtPoint(nextZoom, centerX, centerY);
   };
 
+  /**
+   * Which device the current scroll gesture is coming from, decided on its
+   * first event and kept until the wheel goes quiet. See lib/wheel.ts.
+   */
+  const wheelGesture = useRef<{ device: WheelDevice; at: number } | null>(null);
+
+  /**
+   * The wheel on the canvas.
+   *
+   * A mouse wheel zooms about the cursor, one fixed step per click, with or
+   * without Cmd or Ctrl held; Shift and the wheel pans sideways. A trackpad
+   * keeps doing what trackpads do: two fingers pan, and a pinch — which the
+   * browser sends as a wheel event with Ctrl held — zooms.
+   */
   useEffect(() => {
     const el = containerRef.current;
     if (!el || !isCanvasMode) return;
     const handleWheelNative = (e: WheelEvent) => {
       if (isInteractionBlocked) return;
-      e.preventDefault(); 
-      if (e.ctrlKey || e.metaKey || e.altKey) {
-        const zoomSensitivity = 0.003; 
-        const delta = -e.deltaY * zoomSensitivity;
-        const nextZoom = Math.min(Math.max(zoomRef.current + delta, 0.05), 5);
-        performZoomAtPoint(nextZoom, e.clientX, e.clientY);
-      } else {
-        const nextPan = { x: panRef.current.x - e.deltaX, y: panRef.current.y - e.deltaY };
-        setPan(nextPan);
-        panRef.current = nextPan;
+      e.preventDefault();
+
+      const now = performance.now();
+      const last = wheelGesture.current;
+      const device = last && now - last.at < WHEEL_GESTURE_GAP_MS ? last.device : classifyWheel(e);
+      wheelGesture.current = { device, at: now };
+      const modified = e.ctrlKey || e.metaKey || e.altKey;
+
+      if (device === 'mouse') {
+        const clicks = wheelClicks(e);
+        const direction = Math.sign(e.deltaY || e.deltaX);
+        if (direction === 0) return;
+        if (e.shiftKey && !modified) {
+          const nextPan = { x: panRef.current.x - direction * clicks * 100, y: panRef.current.y };
+          setPan(nextPan);
+          panRef.current = nextPan;
+          return;
+        }
+        // Wheel away from you (a negative delta) zooms in.
+        const factor = Math.pow(WHEEL_ZOOM_STEP, clicks);
+        performZoomAtPoint(clampZoom(direction < 0 ? zoomRef.current * factor : zoomRef.current / factor), e.clientX, e.clientY);
+        return;
       }
+
+      if (modified) {
+        const zoomSensitivity = 0.003;
+        performZoomAtPoint(clampZoom(zoomRef.current - e.deltaY * zoomSensitivity), e.clientX, e.clientY);
+        return;
+      }
+
+      const nextPan = { x: panRef.current.x - e.deltaX, y: panRef.current.y - e.deltaY };
+      setPan(nextPan);
+      panRef.current = nextPan;
     };
     el.addEventListener('wheel', handleWheelNative, { passive: false });
     return () => { el.removeEventListener('wheel', handleWheelNative); };
