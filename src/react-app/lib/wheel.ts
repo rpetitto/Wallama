@@ -67,3 +67,55 @@ export function wheelClicks(e: WheelLike): number {
     : value / 100;
   return Math.min(4, Math.max(1, clicks));
 }
+
+/**
+ * What scrolling does on the canvas, as the person viewing has chosen.
+ *
+ * "auto" goes by the device, as above. The other two exist because some mice
+ * can't be told from a trackpad: a Magic Mouse is a touch surface, and wheels
+ * with smooth scrolling turned on (Logitech's MX range, by default on a Mac)
+ * send exactly the events a trackpad does. Nothing in the event separates
+ * them, so the person gets to say.
+ *
+ * Kept in this browser only. It is about the hardware on this desk, not the
+ * wall or the account, and losing it costs one click.
+ */
+export type ScrollMode = 'auto' | 'zoom' | 'pan';
+
+const SCROLL_MODE_KEY = 'wallama:scroll-mode';
+const SCROLL_HINT_KEY = 'wallama:scroll-hint-seen';
+
+export function readScrollMode(): ScrollMode {
+  try {
+    const value = localStorage.getItem(SCROLL_MODE_KEY);
+    return value === 'zoom' || value === 'pan' ? value : 'auto';
+  } catch {
+    return 'auto';
+  }
+}
+
+export function saveScrollMode(mode: ScrollMode): void {
+  try {
+    if (mode === 'auto') localStorage.removeItem(SCROLL_MODE_KEY);
+    else localStorage.setItem(SCROLL_MODE_KEY, mode);
+  } catch {
+    // Private windows and blocked storage: the choice lasts until the tab closes.
+  }
+}
+
+/** Whether the one-time "scrolling moves the board" tip has been shown here. */
+export function scrollHintSeen(): boolean {
+  try {
+    return localStorage.getItem(SCROLL_HINT_KEY) === '1';
+  } catch {
+    return true; // Can't remember it, so don't risk showing it on every visit.
+  }
+}
+
+export function markScrollHintSeen(): void {
+  try {
+    localStorage.setItem(SCROLL_HINT_KEY, '1');
+  } catch {
+    // As above.
+  }
+}

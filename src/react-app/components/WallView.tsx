@@ -3,7 +3,7 @@ import React, { useState, useEffect, useLayoutEffect, useCallback, useRef } from
 import { Wall, Post as PostType, UserRole, ClassroomCourse, WallType, User } from '../types';
 import Post from './Post';
 import PostEditor from './PostEditor';
-import { ChevronLeft, Plus, Share2, Settings, X, Check, ZoomIn, ZoomOut, Maximize, Loader2, AlertCircle, LayoutGrid, Lock, Unlock, Image as ImageIcon, Copy, Search, School, Trash2, ShieldAlert, Upload, HardDrive, Link as LinkIcon, Grip, Layers, List, History, Kanban, Info, LogIn } from 'lucide-react';
+import { ChevronLeft, Plus, Share2, Settings, X, Check, ZoomIn, ZoomOut, Maximize, Loader2, AlertCircle, LayoutGrid, Lock, Unlock, Image as ImageIcon, Copy, Search, School, Trash2, ShieldAlert, Upload, HardDrive, Link as LinkIcon, Grip, Layers, List, History, Kanban, Info, LogIn , Mouse, Hand, Wand2 } from 'lucide-react';
 import { WALL_GRADIENTS, WALL_TYPE_OPTIONS } from '../constants';
 import {
   TIMELINE_AXIS_Y,
@@ -13,7 +13,7 @@ import {
   CARD_WIDTH,
 } from '../../shared/layout';
 import { authService, databaseService, searchService } from '../lib/api';
-import { classifyWheel, wheelClicks, type WheelDevice } from '../lib/wheel';
+import { classifyWheel, wheelClicks, readScrollMode, saveScrollMode, scrollHintSeen, markScrollHintSeen, type WheelDevice, type ScrollMode } from '../lib/wheel';
 import { classroomService } from '../lib/classroom';
 import { DRIVE_SCOPES, SIGN_IN_SCOPES, tokenClient, storeAccessToken, type TokenClient } from '../lib/google';
 import EmojiPicker from 'emoji-picker-react';
@@ -148,6 +148,13 @@ const clampZoom = (z: number) => Math.min(Math.max(z, MIN_ZOOM), MAX_ZOOM);
 const WHEEL_ZOOM_STEP = 1.15;
 /** A pause this long between wheel events ends one scroll gesture. */
 const WHEEL_GESTURE_GAP_MS = 300;
+
+/** The choices in the zoom bar's "When you scroll" menu. */
+const SCROLL_MODES: { id: ScrollMode; label: string; short: string; desc: string; icon: typeof Mouse }[] = [
+  { id: 'auto', label: 'Detect automatically', short: 'Auto', desc: 'A mouse wheel zooms. Trackpad scrolling moves the board.', icon: Wand2 },
+  { id: 'zoom', label: 'Always zoom', short: 'Zoom', desc: 'Scrolling zooms. Drag the background to move around.', icon: ZoomIn },
+  { id: 'pan', label: 'Always move', short: 'Move', desc: 'Scrolling moves the board. Pinch, or hold ⌘ or Ctrl, to zoom.', icon: Hand },
+];
 
 interface WallViewProps {
   wallId: string;
@@ -538,13 +545,50 @@ const WallView: React.FC<WallViewProps> = ({
    */
   const wheelGesture = useRef<{ device: WheelDevice; at: number } | null>(null);
 
+  // What scrolling does, as this viewer chose in the zoom bar. Read through a
+  // ref by the wheel listener so changing it doesn't re-register the listener.
+  const [scrollMode, setScrollModeState] = useState<ScrollMode>(readScrollMode);
+  const scrollModeRef = useRef(scrollMode);
+  const [showScrollMenu, setShowScrollMenu] = useState(false);
+  const [showScrollHint, setShowScrollHint] = useState(false);
+  const scrollHintShown = useRef(scrollHintSeen());
+  const scrollMenuRef = useRef<HTMLDivElement>(null);
+
+  const setScrollMode = (mode: ScrollMode) => {
+    scrollModeRef.current = mode;
+    setScrollModeState(mode);
+    saveScrollMode(mode);
+    setShowScrollMenu(false);
+    setShowScrollHint(false);
+  };
+
+  useEffect(() => {
+    if (!showScrollMenu) return;
+    const close = (e: MouseEvent | KeyboardEvent) => {
+      if (e instanceof KeyboardEvent ? e.key === 'Escape' : !scrollMenuRef.current?.contains(e.target as Node)) {
+        setShowScrollMenu(false);
+      }
+    };
+    document.addEventListener('mousedown', close);
+    document.addEventListener('keydown', close);
+    return () => { document.removeEventListener('mousedown', close); document.removeEventListener('keydown', close); };
+  }, [showScrollMenu]);
+
+  useEffect(() => {
+    if (!showScrollHint) return;
+    const timer = setTimeout(() => setShowScrollHint(false), 12000);
+    return () => clearTimeout(timer);
+  }, [showScrollHint]);
+
   /**
    * The wheel on the canvas.
    *
-   * A mouse wheel zooms about the cursor, one fixed step per click, with or
-   * without Cmd or Ctrl held; Shift and the wheel pans sideways. A trackpad
-   * keeps doing what trackpads do: two fingers pan, and a pinch — which the
-   * browser sends as a wheel event with Ctrl held — zooms.
+   * Left on "auto", a mouse wheel zooms about the cursor, one fixed step per
+   * click, with or without Cmd or Ctrl held, and Shift with the wheel pans
+   * sideways. A trackpad keeps doing what trackpads do: two fingers pan, and a
+   * pinch — which the browser sends as a wheel event with Ctrl held — zooms.
+   * "Always zoom" and "Always move" override the device guess for mice that
+   * scroll like trackpads.
    */
   useEffect(() => {
     const el = containerRef.current;
@@ -555,35 +599,49 @@ const WallView: React.FC<WallViewProps> = ({
 
       const now = performance.now();
       const last = wheelGesture.current;
-      const device = last && now - last.at < WHEEL_GESTURE_GAP_MS ? last.device : classifyWheel(e);
+      const fresh = !last || now - last.at >= WHEEL_GESTURE_GAP_MS;
+      const device = fresh ? classifyWheel(e) : last.device;
       wheelGesture.current = { device, at: now };
       const modified = e.ctrlKey || e.metaKey || e.altKey;
+      const mode = scrollModeRef.current;
+      const scrollZooms = mode === 'zoom' || (mode === 'auto' && device === 'mouse');
+      const direction = Math.sign(e.deltaY || e.deltaX);
+      if (direction === 0) return;
 
-      if (device === 'mouse') {
-        const clicks = wheelClicks(e);
-        const direction = Math.sign(e.deltaY || e.deltaX);
-        if (direction === 0) return;
-        if (e.shiftKey && !modified) {
-          const nextPan = { x: panRef.current.x - direction * clicks * 100, y: panRef.current.y };
-          setPan(nextPan);
-          panRef.current = nextPan;
-          return;
-        }
-        // Wheel away from you (a negative delta) zooms in.
-        const factor = Math.pow(WHEEL_ZOOM_STEP, clicks);
-        performZoomAtPoint(clampZoom(direction < 0 ? zoomRef.current * factor : zoomRef.current / factor), e.clientX, e.clientY);
+      if (scrollZooms && e.shiftKey && !modified) {
+        const step = device === 'mouse' ? wheelClicks(e) * 100 : Math.abs(e.deltaY || e.deltaX);
+        const nextPan = { x: panRef.current.x - direction * step, y: panRef.current.y };
+        setPan(nextPan);
+        panRef.current = nextPan;
         return;
       }
 
-      if (modified) {
-        const zoomSensitivity = 0.003;
-        performZoomAtPoint(clampZoom(zoomRef.current - e.deltaY * zoomSensitivity), e.clientX, e.clientY);
+      if (scrollZooms || modified) {
+        let next: number;
+        if (device === 'mouse') {
+          // Wheel away from you (a negative delta) zooms in, a fixed step a click.
+          const factor = Math.pow(WHEEL_ZOOM_STEP, wheelClicks(e));
+          next = direction < 0 ? zoomRef.current * factor : zoomRef.current / factor;
+        } else if (modified) {
+          next = zoomRef.current - e.deltaY * 0.003; // a pinch, at the rate it has always had
+        } else {
+          next = zoomRef.current * Math.exp(-e.deltaY * 0.002); // a smooth scroll, in "Always zoom"
+        }
+        performZoomAtPoint(clampZoom(next), e.clientX, e.clientY);
         return;
       }
 
       const nextPan = { x: panRef.current.x - e.deltaX, y: panRef.current.y - e.deltaY };
       setPan(nextPan);
       panRef.current = nextPan;
+
+      // A straight up-and-down scroll that was taken for a trackpad might be a
+      // mouse that scrolls like one. Say once where to change it.
+      if (mode === 'auto' && fresh && e.deltaX === 0 && !scrollHintShown.current) {
+        scrollHintShown.current = true;
+        markScrollHintSeen();
+        setShowScrollHint(true);
+      }
     };
     el.addEventListener('wheel', handleWheelNative, { passive: false });
     return () => { el.removeEventListener('wheel', handleWheelNative); };
@@ -1142,6 +1200,50 @@ const WallView: React.FC<WallViewProps> = ({
           <button onClick={() => handleManualZoom(1)} aria-label="Zoom in" className="p-2 hover:bg-slate-100 rounded-lg text-slate-600"><ZoomIn size={20} /></button>
           <div className="w-px h-6 bg-slate-200 mx-0.5 sm:mx-1" />
           <button onClick={zoomFit} aria-label="Fit all posts on screen" className="p-2 hover:bg-slate-100 rounded-lg text-slate-600 flex items-center gap-2 font-bold text-xs"><Maximize size={18} /><span className="hidden sm:inline">Fit</span></button>
+          {/* What the scroll wheel does. Desktop only: a phone has no wheel. */}
+          <div ref={scrollMenuRef} className="relative hidden [@media(pointer:fine)]:flex items-center gap-1 sm:gap-2">
+            <div className="w-px h-6 bg-slate-200 mx-0.5 sm:mx-1" />
+            <button
+              onClick={() => { setShowScrollMenu(v => !v); setShowScrollHint(false); }}
+              aria-label={`When you scroll: ${SCROLL_MODES.find(m => m.id === scrollMode)!.label}`}
+              aria-expanded={showScrollMenu}
+              data-testid="scroll-mode"
+              className={`p-2 rounded-lg flex items-center gap-2 font-bold text-xs ${showScrollMenu ? 'bg-slate-100 text-slate-800' : 'text-slate-600 hover:bg-slate-100'}`}
+            >
+              <Mouse size={18} /><span className="hidden sm:inline">Scroll: {SCROLL_MODES.find(m => m.id === scrollMode)!.short}</span>
+            </button>
+            {showScrollMenu && (
+              <div role="menu" aria-label="When you scroll" className="absolute bottom-full left-0 mb-3 w-72 bg-white rounded-2xl shadow-2xl border border-slate-200 p-2">
+                <p className="px-2 pt-1 pb-2 text-[10px] font-black uppercase tracking-widest text-slate-400">When you scroll</p>
+                {SCROLL_MODES.map(option => (
+                  <button
+                    key={option.id}
+                    role="menuitemradio"
+                    aria-checked={scrollMode === option.id}
+                    data-testid={`scroll-mode-${option.id}`}
+                    onClick={() => setScrollMode(option.id)}
+                    className={`w-full p-2.5 rounded-xl text-left flex items-start gap-3 ${scrollMode === option.id ? 'bg-cyan-50' : 'hover:bg-slate-50'}`}
+                  >
+                    <div className={`h-8 w-8 rounded-lg flex items-center justify-center shrink-0 ${scrollMode === option.id ? 'bg-cyan-600 text-white' : 'bg-slate-100 text-slate-500'}`}><option.icon size={16} /></div>
+                    <div className="min-w-0">
+                      <p className={`text-sm font-bold ${scrollMode === option.id ? 'text-cyan-900' : 'text-slate-800'}`}>{option.label}</p>
+                      <p className="text-xs text-slate-500 leading-snug">{option.desc}</p>
+                    </div>
+                  </button>
+                ))}
+              </div>
+            )}
+          </div>
+        </div>
+      )}
+
+      {isCanvasMode && showScrollHint && !isInteractionBlocked && (
+        <div role="status" data-testid="scroll-hint" className="fixed left-3 sm:left-10 bottom-[calc(env(safe-area-inset-bottom)_+_4.75rem)] sm:bottom-28 z-[100] w-[calc(100%-1.5rem)] max-w-sm bg-slate-900 text-white rounded-2xl shadow-2xl p-4 space-y-3 animate-in fade-in slide-in-from-bottom-2 duration-300">
+          <p className="text-sm leading-relaxed">Scrolling moved the board. Using a mouse wheel, and wanted to zoom?</p>
+          <div className="flex gap-2">
+            <button onClick={() => setScrollMode('zoom')} className="flex-1 py-2 px-3 bg-cyan-500 hover:bg-cyan-400 text-slate-900 font-bold text-sm rounded-xl">Make scrolling zoom</button>
+            <button onClick={() => setShowScrollHint(false)} className="py-2 px-3 text-slate-300 hover:text-white font-bold text-sm rounded-xl">Keep it</button>
+          </div>
         </div>
       )}
 
