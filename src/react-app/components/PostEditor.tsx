@@ -1,7 +1,8 @@
 
 import React, { useState, useRef, useEffect } from 'react';
 import { PostType, Post } from '../types';
-import { X, Image as ImageIcon, Link as LinkIcon, Gift, Video, Sparkles, Send, Camera, StopCircle, Upload, Loader2, Type, Search, Check, Palette, MessageSquare, ShieldAlert, Save, HardDrive, Bold, Italic, Underline, Code, List, ListOrdered, Quote, LayoutGrid, Link as LinkIconSmall } from 'lucide-react';
+import { X, Image as ImageIcon, Link as LinkIcon, Gift, Video, Sparkles, Send, Camera, StopCircle, Upload, Loader2, Type, Search, Check, Palette, MessageSquare, ShieldAlert, Save, HardDrive, Bold, Italic, Underline, Code, List, ListOrdered, Quote, LayoutGrid, Link as LinkIconSmall, ImagePlus } from 'lucide-react';
+import { getVideoEmbedUrl } from './Post';
 import { aiService, databaseService, searchService } from '../lib/api';
 import { DRIVE_SCOPES, tokenClient, type TokenClient } from '../lib/google';
 import { WALL_COLORS, WALL_GRADIENTS } from '../constants';
@@ -22,6 +23,9 @@ interface PostEditorProps {
  * they were in the bundle every visitor downloads. They are Worker secrets now,
  * and `searchService` asks our own server instead — see src/worker/routes/search.ts.
  */
+
+/** A picture uploaded to this wall, as opposed to one a link lookup found on the web. */
+const isUploadedImage = (src?: string | null) => !!src && src.startsWith('/api/media/');
 
 const PostEditor: React.FC<PostEditorProps> = ({ onClose, onSubmit, wallId, authorName, initialPost, parentId, isKanbanColumn }) => {
   const [type, setType] = useState<PostType>('title');
@@ -75,6 +79,7 @@ const PostEditor: React.FC<PostEditorProps> = ({ onClose, onSubmit, wallId, auth
   /** The frame `videoThumbnail` was uploaded from, so a new pick re-uploads and a re-submit doesn't. */
   const uploadedFrame = useRef<string | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
+  const linkImageInputRef = useRef<HTMLInputElement>(null);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const driveTokenClient = useRef<TokenClient | null>(null);
 
@@ -207,20 +212,58 @@ const PostEditor: React.FC<PostEditorProps> = ({ onClose, onSubmit, wallId, auth
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [type]);
 
+  /**
+   * Look the link up for a title and a picture.
+   *
+   * A picture the poster uploaded wins over whatever the lookup finds, and
+   * survives the lookup running again — it runs every time the address box
+   * loses focus. When the lookup finds nothing, which is usual for Google Docs
+   * and Slides since they need a sign-in, the old title is dropped rather than
+   * left describing a different link.
+   */
   const fetchLinkMetadata = async (targetUrl: string) => {
     if (!targetUrl || !targetUrl.startsWith('http')) return;
     setIsFetchingLink(true);
     try {
       const preview = await searchService.linkPreview(targetUrl);
-      if (preview) {
-        setLinkMetadata({
+      setLinkMetadata((prev: any) => {
+        const uploaded = isUploadedImage(prev?.image) ? prev.image : undefined;
+        if (!preview) return { url: targetUrl, image: uploaded };
+        return {
           title: preview.title,
           description: preview.description,
-          image: preview.image,
+          image: uploaded ?? preview.image,
           url: preview.url,
-        });
-      }
+        };
+      });
     } finally { setIsFetchingLink(false); }
+  };
+
+  /**
+   * A picture for a link card that came without one, uploaded to the wall like
+   * any other image. It is checked by the safety filter on Post, as an image
+   * post is.
+   */
+  const handleLinkImageUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    e.target.value = '';
+    if (!file) return;
+    setIsUploading(true);
+    setUploadError(null);
+    try {
+      const { key, url: uploadedUrl } = await databaseService.uploadMedia(wallId, file);
+      setUploadedMediaKey(key);
+      setLinkMetadata((prev: any) => ({ ...(prev ?? {}), url: prev?.url ?? url, image: uploadedUrl }));
+    } catch (err: any) {
+      setUploadError(err?.message ?? "That picture couldn't be uploaded.");
+    } finally {
+      setIsUploading(false);
+    }
+  };
+
+  const removeLinkImage = () => {
+    setLinkMetadata((prev: any) => ({ ...(prev ?? {}), image: undefined }));
+    setUploadedMediaKey(null);
   };
 
   /* ---------- video: countdown, record, pick a thumbnail ---------- */
@@ -428,7 +471,11 @@ const PostEditor: React.FC<PostEditorProps> = ({ onClose, onSubmit, wallId, auth
       submissionMetadata.videoThumbnail = thumbnail;
     } else if (type === 'image' || type === 'gif') {
       submissionContent = url;
-    } else if (type === 'link' || type === 'drive') {
+    } else if (type === 'link') {
+      submissionContent = url;
+      // Always keep the address: the card opens metadata.url when clicked.
+      submissionMetadata = { ...submissionMetadata, ...linkMetadata, url };
+    } else if (type === 'drive') {
       submissionContent = url;
       submissionMetadata = { ...submissionMetadata, ...linkMetadata };
     } else if (type === 'title') {
@@ -448,7 +495,9 @@ const PostEditor: React.FC<PostEditorProps> = ({ onClose, onSubmit, wallId, auth
     setIsCheckingSafety(true);
     const safetyResult = await aiService.checkContentSafety(
         safetyPayload,
-        type === 'image' && uploadedMediaKey ? uploadedMediaKey : undefined,
+        uploadedMediaKey && (type === 'image' || (type === 'link' && isUploadedImage(linkMetadata?.image)))
+          ? uploadedMediaKey
+          : undefined,
     );
     
     if (!safetyResult.isSafe) {
@@ -629,7 +678,49 @@ const PostEditor: React.FC<PostEditorProps> = ({ onClose, onSubmit, wallId, auth
             {type === 'link' && (
               <div className="space-y-4">
                 <input type="text" value={url} onBlur={() => fetchLinkMetadata(url)} onChange={(e) => setUrl(e.target.value)} placeholder="https://example.com" className="w-full p-4 bg-white/50 border border-black/5 rounded-xl outline-none text-slate-900 font-bold" />
-                {linkMetadata && <div className="p-4 bg-white/60 rounded-2xl border border-black/5 flex gap-4">{linkMetadata.image && <img src={linkMetadata.image} className="h-16 w-16 rounded-lg object-cover" alt="" />}<div className="flex-1"><p className="text-sm font-bold text-slate-900">{linkMetadata.title}</p></div></div>}
+                {isFetchingLink && (
+                  <p className="text-xs font-bold text-slate-500 flex items-center gap-2"><Loader2 size={14} className="animate-spin" /> Looking up the link…</p>
+                )}
+                {/* The card as it will look. A video link plays on the card instead, so it gets no picture. */}
+                {url.startsWith('http') && !isFetchingLink && !getVideoEmbedUrl(url) && (
+                  <div data-testid="link-preview" className="bg-white/60 rounded-2xl border border-black/5 overflow-hidden">
+                    {linkMetadata?.image ? (
+                      <div className="relative">
+                        <img
+                          src={linkMetadata.image}
+                          className="w-full h-32 object-cover"
+                          alt=""
+                          // A picture the lookup found but can't be shown counts as no
+                          // picture: drop it, so the card isn't saved with a broken one.
+                          onError={() => { if (!isUploadedImage(linkMetadata.image)) setLinkMetadata((prev: any) => ({ ...prev, image: undefined })); }}
+                        />
+                        {isUploadedImage(linkMetadata.image) && (
+                          <div className="absolute top-2 right-2 flex gap-1">
+                            <button type="button" onClick={() => linkImageInputRef.current?.click()} disabled={isUploading} className="px-2.5 py-1 bg-white/90 hover:bg-white text-slate-700 text-[11px] font-black uppercase tracking-wider rounded-lg shadow-sm">Change</button>
+                            <button type="button" onClick={removeLinkImage} className="px-2.5 py-1 bg-white/90 hover:bg-white text-red-600 text-[11px] font-black uppercase tracking-wider rounded-lg shadow-sm">Remove</button>
+                          </div>
+                        )}
+                      </div>
+                    ) : (
+                      <button
+                        type="button"
+                        data-testid="link-add-picture"
+                        onClick={() => linkImageInputRef.current?.click()}
+                        disabled={isUploading}
+                        className="w-full h-32 px-4 flex flex-col items-center justify-center gap-1 border-b-2 border-dashed border-black/10 text-slate-500 hover:bg-white/70 hover:text-cyan-700 transition-colors disabled:opacity-60"
+                      >
+                        {isUploading ? <Loader2 size={22} className="animate-spin" /> : <ImagePlus size={22} />}
+                        <span className="text-sm font-bold">{isUploading ? 'Uploading…' : 'Add a picture'}</span>
+                        <span className="text-[11px] font-medium">This link didn't come with one. Upload your own to show on the card.</span>
+                      </button>
+                    )}
+                    <div className="p-3">
+                      <p className="text-[10px] font-black text-indigo-600 uppercase tracking-tighter mb-1">Web Link</p>
+                      <p className="text-sm font-bold text-slate-900 leading-tight line-clamp-2 break-all">{linkMetadata?.title || url}</p>
+                    </div>
+                    <input ref={linkImageInputRef} type="file" accept="image/*" className="hidden" onChange={handleLinkImageUpload} />
+                  </div>
+                )}
               </div>
             )}
 

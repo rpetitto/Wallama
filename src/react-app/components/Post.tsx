@@ -40,7 +40,7 @@ const getRelativeTime = (timestamp: number): string => {
   return new Date(timestamp).toLocaleDateString();
 };
 
-const getVideoEmbedUrl = (url?: string) => {
+export const getVideoEmbedUrl = (url?: string) => {
   if (!url) return null;
   
   // YouTube (Standard, Short, Embed, etc.)
@@ -279,7 +279,10 @@ const Post: React.FC<PostProps> = ({
            );
         }
         return (
-          <a href={post.metadata?.url} target="_blank" rel="noopener noreferrer" className="block bg-white/60 rounded-xl overflow-hidden hover:bg-white/90 transition-all border border-black/5 group shadow-sm">
+          // The address the student typed is the fallback: when the link lookup
+          // failed, older posts were saved with no metadata.url at all, and the
+          // card went nowhere when clicked.
+          <a href={post.metadata?.url || post.content} target="_blank" rel="noopener noreferrer" className="block bg-white/60 rounded-xl overflow-hidden hover:bg-white/90 transition-all border border-black/5 group shadow-sm">
             {post.metadata?.image && (
               <img src={post.metadata.image} className="w-full h-32 object-cover border-b border-black/5" alt="Preview" />
             )}
@@ -294,7 +297,7 @@ const Post: React.FC<PostProps> = ({
         );
       case 'drive':
         return (
-            <a href={post.metadata?.url} target="_blank" rel="noopener noreferrer" className="block bg-white/80 rounded-xl overflow-hidden hover:bg-white transition-all border border-black/5 group shadow-sm">
+            <a href={post.metadata?.url || post.content} target="_blank" rel="noopener noreferrer" className="block bg-white/80 rounded-xl overflow-hidden hover:bg-white transition-all border border-black/5 group shadow-sm">
                 <div className="p-4 flex items-start gap-3">
                     {post.metadata?.image ? (
                         <img src={post.metadata.image} className="w-12 h-12 rounded-lg object-cover bg-slate-100" alt="Preview" referrerPolicy="no-referrer" />
