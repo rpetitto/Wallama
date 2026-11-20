@@ -37,6 +37,17 @@ body {
   -webkit-user-drag: none;
 }
 
+/*
+ * A pasted web address is one long word with nowhere to wrap, so it ran
+ * straight out of the side of the card. Break a word only when it can't fit on
+ * a line by itself; ordinary text wraps exactly as before. `word-break` is the
+ * fallback for Safari before 15.4, which doesn't know `anywhere`.
+ */
+.post-container {
+  overflow-wrap: anywhere;
+  word-break: break-word;
+}
+
 /* Custom scrollbar for better aesthetics */
 .custom-scrollbar::-webkit-scrollbar { width: 6px; }
 .custom-scrollbar::-webkit-scrollbar-track { background: transparent; }
