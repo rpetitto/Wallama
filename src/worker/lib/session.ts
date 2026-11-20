@@ -13,7 +13,7 @@
  */
 
 import type { Context } from "hono";
-import { db, storage } from "../platform";
+import { db, storage, currentEnv } from "../platform";
 
 export const SESSION_COOKIE = "wallama_session";
 const SESSION_DAYS = 30;
@@ -130,9 +130,51 @@ export async function requireUser(c: Context): Promise<AppUser> {
   return user;
 }
 
+/* ---------- administrators ---------- */
+
+/**
+ * Is this address one of the administrators?
+ *
+ * The list is the ADMIN_EMAILS secret, not code: the repository is public, and
+ * a list of who holds the keys to every wall is not something to publish.
+ */
+export function isAdminEmail(email: string | null | undefined): boolean {
+  if (!email) return false;
+  const admins = String(currentEnv().ADMIN_EMAILS ?? "")
+    .toLowerCase()
+    .split(/[\s,;]+/)
+    .filter(Boolean);
+  return admins.includes(email.trim().toLowerCase());
+}
+
+/**
+ * An administrator: treated as the teacher of every wall.
+ *
+ * Only a Google account counts. Its email is the one Google verified at sign-in
+ * (routes/auth.ts refuses an unverified one), and a guest has none, so nobody
+ * can become an administrator by typing an address.
+ */
+export function isAdmin(user: AppUser | null): boolean {
+  return !!user && !user.is_guest && !!user.google_sub && isAdminEmail(user.email);
+}
+
+/** The role someone acts with. An administrator is always a teacher. */
+export function effectiveRole(user: AppUser): "teacher" | "student" {
+  return isAdmin(user) ? "teacher" : user.role;
+}
+
+/**
+ * May this person do what a wall's own teacher may: change its settings,
+ * delete it, edit or remove anyone's post, and keep working when it's frozen?
+ * The teacher who made it, and administrators.
+ */
+export function ownsWall(wall: WallRow, user: AppUser | null): boolean {
+  return !!user && (wall.teacher_id === user.id || isAdmin(user));
+}
+
 export async function requireTeacher(c: Context): Promise<AppUser> {
   const user = await requireUser(c);
-  if (user.role !== "teacher" || user.is_guest) {
+  if (effectiveRole(user) !== "teacher" || user.is_guest) {
     throw new HttpError(403, "Only a signed-in teacher can do that.");
   }
   return user;
@@ -172,7 +214,7 @@ async function isMember(wallId: string, userId: string): Promise<boolean> {
 export async function canReadWall(wall: WallRow, user: AppUser | null): Promise<boolean> {
   if (wall.privacy_type === "public" || wall.privacy_type === "link") return true;
   if (!user) return false;
-  if (wall.teacher_id === user.id) return true;
+  if (ownsWall(wall, user)) return true;
   if (await isMember(wall.id, user.id)) return true;
 
   if (wall.privacy_type === "domain") {
@@ -194,12 +236,12 @@ export async function requireReadableWall(c: Context, wallId: string): Promise<{
   return { wall, user };
 }
 
-/** Only the teacher who created a wall may change or delete it. */
+/** Only the teacher who created a wall, or an administrator, may change or delete it. */
 export async function requireWallOwner(c: Context, wallId: string): Promise<{ wall: WallRow; user: AppUser }> {
   const user = await requireUser(c);
   const wall = await wallById(wallId);
   if (!wall) throw new HttpError(404, "That wall doesn't exist.");
-  if (wall.teacher_id !== user.id) throw new HttpError(403, "That's not your wall.");
+  if (!ownsWall(wall, user)) throw new HttpError(403, "That's not your wall.");
   return { wall, user };
 }
 
@@ -213,7 +255,7 @@ export async function requireWallOwner(c: Context, wallId: string): Promise<{ wa
 export async function requirePoster(c: Context, wall: WallRow): Promise<AppUser> {
   const user = await requireUser(c);
   if (!(await canReadWall(wall, user))) throw new HttpError(403, "You don't have access to that wall.");
-  const isOwner = wall.teacher_id === user.id;
+  const isOwner = ownsWall(wall, user);
   if (wall.is_frozen && !isOwner) throw new HttpError(403, "This wall is frozen.");
   if (wall.require_login_to_post && user.is_guest && !isOwner) {
     throw new HttpError(403, "You have to sign in to post on this wall.");

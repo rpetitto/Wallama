@@ -169,10 +169,12 @@ interface WallViewProps {
   authorName: string;
   userRole: UserRole;
   isGuest?: boolean;
+  /** An administrator gets the wall teacher's controls on every wall. The server enforces it either way. */
+  isAdmin?: boolean;
 }
 
 const WallView: React.FC<WallViewProps> = ({ 
-  wallId, onBack, onAddPost, onDeletePost, onMovePost, onUpdateWall, onEditPost, onLogin, currentUserId, authorName, userRole, isGuest 
+  wallId, onBack, onAddPost, onDeletePost, onMovePost, onUpdateWall, onEditPost, onLogin, currentUserId, authorName, userRole, isGuest, isAdmin 
 }) => {
   const [wall, setWall] = useState<Wall | null>(null);
   const [showEditor, setShowEditor] = useState(false);
@@ -1013,7 +1015,7 @@ const WallView: React.FC<WallViewProps> = ({
   if (isSyncing && !wall) return <div className="min-h-screen flex items-center justify-center"><Loader2 className="animate-spin text-cyan-600" size={40} /></div>;
   if (!wall) return null;
 
-  const isTeacher = (userRole === 'teacher' && wall.teacherId === currentUserId);
+  const isTeacher = (userRole === 'teacher' && wall.teacherId === currentUserId) || !!isAdmin;
   const backgroundStyle = isImageSource(wall.background)
     ? { backgroundImage: `url(${wall.background})`, backgroundSize: 'cover', backgroundPosition: 'center', backgroundAttachment: 'fixed' }
     : { background: wall.background.includes('from-') ? undefined : wall.background };

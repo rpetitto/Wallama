@@ -27,6 +27,12 @@ export interface Bindings {
   ANTHROPIC_API_KEY?: string;
   GIPHY_API_KEY?: string;
   PEXELS_API_KEY?: string;
+  /**
+   * Accounts that may do anything on any wall, by Google email, separated by
+   * commas or spaces. A secret rather than a var because the repository is
+   * public and these are people's addresses. See isAdmin in lib/session.ts.
+   */
+  ADMIN_EMAILS?: string;
   [key: string]: unknown;
 }
 

@@ -115,6 +115,15 @@ from a laptop means every deploy is the same deploy.
   it there — because deleting a post deletes its children, and on a Freeform
   canvas nobody can see which cards those are.
 
+- **Administrators are a secret, not code.** Google accounts listed in the
+  `ADMIN_EMAILS` secret (comma-separated) are treated as the teacher of every
+  wall: they can read private walls, change any wall's settings or delete it,
+  edit or remove any post, and post on frozen walls, and they sign in as a
+  teacher whatever Classroom says. It is one helper, `ownsWall` in
+  `src/worker/lib/session.ts`, that every owner check goes through. The list
+  is a secret because the repository is public; set it as a repository secret
+  and the deploy pushes it to the Worker like the API keys.
+
 - **Anonymous walls are anonymous in the UI only.** The server sends real author
   names and `Post.tsx` hides them when the wall is set to anonymous — unchanged
   from the Supabase build, and worth knowing before promising a class more than

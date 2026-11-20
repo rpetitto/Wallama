@@ -21,6 +21,8 @@ import {
   wallByCode,
   joinWall,
   deleteWallCompletely,
+  effectiveRole,
+  ownsWall,
   now,
   uid,
   param,
@@ -77,7 +79,7 @@ app.get(
     const user = await requireUser(c);
 
     const rows =
-      user.role === "teacher"
+      effectiveRole(user) === "teacher"
         ? await db
             .prepare(`SELECT * FROM walls WHERE teacher_id = ? ORDER BY created_at DESC`)
             .bind(user.id)
@@ -192,7 +194,7 @@ app.post(
   handler(async (c) => {
     const { wall, user } = await requireReadableWall(c, param(c, "id"));
     if (!user) throw new HttpError(401, "You're not signed in.");
-    await joinWall(wall.id, user.id, wall.teacher_id === user.id ? "teacher" : user.role);
+    await joinWall(wall.id, user.id, ownsWall(wall, user) ? "teacher" : effectiveRole(user));
     return c.json({ ok: true });
   }),
 );

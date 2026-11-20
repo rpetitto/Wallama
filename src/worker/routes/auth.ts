@@ -32,9 +32,13 @@ import {
   startSession,
   now,
   uid,
+  isAdmin,
+  isAdminEmail,
+  effectiveRole,
   type AppUser,
 } from "../lib/session";
 import { checkRole } from "../lib/role";
+import type { RoleCheck } from "../../shared/roleCheck";
 
 interface GoogleClaims {
   iss: string;
@@ -177,7 +181,8 @@ app.post(
 
     // Re-checked on every sign-in rather than fixed at first sight: someone who
     // was a student last September may be teaching this one. See lib/role.ts.
-    const roleCheck = await checkRole(accessToken, claims.scope);
+    // An administrator is a teacher whatever Classroom says.
+    const roleCheck: RoleCheck = isAdminEmail(email) ? { result: "teacher" } : await checkRole(accessToken, claims.scope);
     const role = roleCheck.result === "teacher" ? "teacher" : "student";
 
     let user: AppUser;
@@ -271,8 +276,11 @@ export function publicUser(user: AppUser) {
     id: user.id,
     name: user.name,
     email: user.email ?? "",
-    role: user.role,
+    // Worked out per request, so adding or removing an administrator takes
+    // effect on their next page load rather than their next sign-in.
+    role: effectiveRole(user),
     avatar: user.avatar ?? undefined,
     isGuest: !!user.is_guest,
+    isAdmin: isAdmin(user),
   };
 }

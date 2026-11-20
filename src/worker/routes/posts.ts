@@ -13,6 +13,7 @@ import {
   handler,
   requirePoster,
   requireUser,
+  ownsWall,
   wallById,
   bumpWallRev,
   now,
@@ -70,7 +71,7 @@ async function requireEditablePost(c: Parameters<typeof requireUser>[0], postId:
   if (!wall) throw new HttpError(404, "That post's wall doesn't exist.");
 
   const user = await requireUser(c);
-  const isOwner = wall.teacher_id === user.id;
+  const isOwner = ownsWall(wall, user);
   if (post.author_id !== user.id && !isOwner) throw new HttpError(403, "That's not your post.");
   if (wall.is_frozen && !isOwner) throw new HttpError(403, "This wall is frozen.");
   return { post, wall, user, isOwner };

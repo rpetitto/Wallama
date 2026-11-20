@@ -8,6 +8,8 @@ export interface User {
   role: UserRole;
   avatar?: string;
   isGuest?: boolean;
+  /** Treated as the teacher of every wall. The server decides, from its ADMIN_EMAILS secret. */
+  isAdmin?: boolean;
 }
 
 export type PostType = 'title' | 'text' | 'image' | 'link' | 'gif' | 'video' | 'ai' | 'drive';
